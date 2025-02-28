@@ -1,4 +1,4 @@
-//go:build amd64
+//go:build amd64 || arm64
 
 // This file is used when building for AMD64 architecture to utilize the high-performance Sonic JSON library
 
@@ -10,6 +10,8 @@ import (
 	"github.com/bytedance/sonic/decoder"
 	"github.com/bytedance/sonic/encoder"
 )
+
+const Library = "github.com/bytedance/sonic"
 
 // Decoder represents a JSON decoder that utilizes the high-performance Sonic decoder for AMD64 architecture
 type Decoder struct {
@@ -28,6 +30,10 @@ func NewDecoder(r io.Reader) *Decoder {
 // Decode decodes JSON data into the provided interface
 func (d *Decoder) Decode(v interface{}) error {
 	return d.dec.Decode(v)
+}
+
+func (d *Decoder) Buffered() io.Reader {
+	return d.dec.Buffered()
 }
 
 // Encoder represents a JSON encoder that utilizes the high-performance Sonic encoder for AMD64 architecture

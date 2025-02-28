@@ -1,4 +1,4 @@
-//go:build !amd64
+//go:build !amd64 && !arm64
 
 // This file is used when building for non-AMD64 architectures, utilizing the go-json library for JSON operations
 
@@ -9,6 +9,8 @@ import (
 
 	"github.com/goccy/go-json"
 )
+
+const Library = "github.com/goccy/go-json"
 
 // Decoder represents a JSON decoder that uses go-json library for non-AMD64 architectures
 type Decoder struct {
@@ -25,6 +27,10 @@ func NewDecoder(r io.Reader) *Decoder {
 // Decode decodes JSON data into the provided interface
 func (d *Decoder) Decode(v interface{}) error {
 	return d.dec.Decode(v)
+}
+
+func (d *Decoder) Buffered() io.Reader {
+	return d.dec.Buffered()
 }
 
 // Encoder represents a JSON encoder that uses go-json library for non-AMD64 architectures
