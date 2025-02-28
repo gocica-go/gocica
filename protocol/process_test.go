@@ -39,7 +39,7 @@ func TestProcess_knownCommands(t *testing.T) {
 		{
 			name: "push handler only",
 			options: []ProcessOption{
-				WithPushHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
 					return nil
 				}),
 			},
@@ -60,7 +60,7 @@ func TestProcess_knownCommands(t *testing.T) {
 				WithGetHandler(func(ctx context.Context, req *Request, res *Response) error {
 					return nil
 				}),
-				WithPushHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
 					return nil
 				}),
 				WithCloseHandler(func() error {
@@ -132,7 +132,7 @@ func TestProcess_handle(t *testing.T) {
 		{
 			name: "successful put handler",
 			options: []ProcessOption{
-				WithPushHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
 					return nil
 				}),
 			},
@@ -163,7 +163,7 @@ func TestProcess_handle(t *testing.T) {
 					return nil
 				}))
 			} else if tt.wantCalled == "put" {
-				options = append(options, WithPushHandler(func(ctx context.Context, req *Request, res *Response) error {
+				options = append(options, WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
 					called = "put"
 					return nil
 				}))

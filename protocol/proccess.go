@@ -27,10 +27,10 @@ type Logger interface {
 }
 
 // Process represents the main protocol handler that manages request/response cycles
-// It handles different types of commands (get, push, close) and manages communication
+// It handles different types of commands (get, put, close) and manages communication
 type Process struct {
 	getHandler         func(context.Context, *Request, *Response) error
-	pushHandler        func(context.Context, *Request, *Response) error
+	putHandler         func(context.Context, *Request, *Response) error
 	closeHandler       func() error
 	logger             Logger
 	responseBufferSize int
@@ -39,7 +39,7 @@ type Process struct {
 // processOption holds the configuration options for a Process instance
 type processOption struct {
 	getHandler         func(context.Context, *Request, *Response) error
-	pushHandler        func(context.Context, *Request, *Response) error
+	putHandler         func(context.Context, *Request, *Response) error
 	closeHandler       func() error
 	logger             Logger
 	responseBufferSize int
@@ -56,11 +56,11 @@ func WithGetHandler(handler func(context.Context, *Request, *Response) error) Pr
 	}
 }
 
-// WithPushHandler sets the handler for PUSH commands
+// WithPutHandler sets the handler for PUSH commands
 // The handler processes PUSH requests and generates appropriate responses
-func WithPushHandler(handler func(context.Context, *Request, *Response) error) ProcessOption {
+func WithPutHandler(handler func(context.Context, *Request, *Response) error) ProcessOption {
 	return func(o *processOption) {
-		o.pushHandler = handler
+		o.putHandler = handler
 	}
 }
 
@@ -94,7 +94,7 @@ func WithResponseBufferSize(size int) ProcessOption {
 // It initializes the process with default values and applies the provided options
 func NewProcess(options ...ProcessOption) *Process {
 	o := &processOption{
-		logger:             log.NewLogger(),
+		logger:             log.NewLogger(log.Info),
 		responseBufferSize: 100, // デフォルト値
 	}
 	for _, option := range options {
@@ -103,7 +103,7 @@ func NewProcess(options ...ProcessOption) *Process {
 
 	return &Process{
 		getHandler:         o.getHandler,
-		pushHandler:        o.pushHandler,
+		putHandler:         o.putHandler,
 		closeHandler:       o.closeHandler,
 		logger:             o.logger,
 		responseBufferSize: o.responseBufferSize,
@@ -164,6 +164,7 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		res := Response{}
 		err := p.handle(ctx, req, &res)
 		if err != nil {
+			p.logger.Errorf("handle request(%+v): %v", req, err)
 			res.Err = err.Error()
 		}
 		res.ID = req.ID
@@ -196,7 +197,7 @@ func (p *Process) knownCommands() []Cmd {
 	if p.getHandler != nil {
 		commands = append(commands, CmdGet)
 	}
-	if p.pushHandler != nil {
+	if p.putHandler != nil {
 		commands = append(commands, CmdPut)
 	}
 
@@ -213,12 +214,14 @@ func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
 	for resp := range ch {
 		err := encoder.Encode(resp)
 		if err != nil {
-			return fmt.Errorf("encode response(%+v): %w", resp, err)
+			p.logger.Errorf("encode response(%+v): %v", resp, err)
+			continue
 		}
 
 		err = bw.Flush()
 		if err != nil {
-			return fmt.Errorf("flush response(%+v): %w", resp, err)
+			p.logger.Errorf("flush response(%+v): %v", resp, err)
+			continue
 		}
 	}
 
@@ -325,10 +328,10 @@ func (p *Process) handle(ctx context.Context, req *Request, res *Response) error
 		}
 		return p.getHandler(ctx, req, res)
 	case CmdPut:
-		if p.pushHandler == nil {
+		if p.putHandler == nil {
 			return fmt.Errorf("put command not supported")
 		}
-		return p.pushHandler(ctx, req, res)
+		return p.putHandler(ctx, req, res)
 	case CmdClose:
 		return p.close()
 	default:
