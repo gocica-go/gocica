@@ -29,13 +29,10 @@ type Request struct {
 	Command Cmd
 
 	// ActionID is used for identifying specific cache operations.
-	ActionID []byte `json:",omitempty"`
+	ActionID string `json:",omitempty"`
 
 	// OutputID specifies the expected format or version of the output.
-	OutputID []byte `json:",omitempty"`
-
-	// ObjectID is the target object identifier.
-	ObjectID []byte `json:",omitempty"`
+	OutputID string `json:",omitempty"`
 
 	// BodySize is the number of bytes of Body. If zero, the body isn't written.
 	BodySize int64 `json:",omitempty"`
@@ -70,7 +67,7 @@ type Response struct {
 	Miss bool `json:",omitempty"`
 
 	// OutputID identifies the format/version of the response
-	OutputID []byte `json:",omitempty"`
+	OutputID string `json:",omitempty"`
 
 	// Size is the total size of the response data in bytes
 	Size int64 `json:",omitempty"`

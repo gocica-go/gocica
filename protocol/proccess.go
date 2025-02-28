@@ -2,14 +2,18 @@ package protocol
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
-	"gocica/internal/pkg/json"
-	"gocica/internal/pkg/log"
 	"io"
 	"os"
 	"sync"
+
+	myio "github.com/mazrean/gocica/internal/pkg/io"
+	"github.com/mazrean/gocica/internal/pkg/json"
+	"github.com/mazrean/gocica/internal/pkg/log"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -109,14 +113,20 @@ func NewProcess(options ...ProcessOption) *Process {
 // Run starts the main processing loop of the Process
 // It handles JSON requests from stdin and writes responses to stdout
 // The process continues until EOF is received or an error occurs
-func (p *Process) Run() (err error) {
+func (p *Process) Run() error {
+	return p.run(os.Stdout, os.Stdin)
+}
+
+func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 	// Create root context and error groups for concurrent operations
 	ctx := context.Background()
 	eg, ctx := errgroup.WithContext(ctx)
-	encodeEg := errgroup.Group{}
 	// Create buffered channel for responses with configured size
 	resCh := make(chan *Response, p.responseBufferSize)
 	defer func() {
+		// Close response channel to signal encoder goroutine to exit
+		close(resCh)
+
 		// Perform cleanup and collect any errors that occur
 		deferErr := p.close()
 		if deferErr != nil {
@@ -127,7 +137,7 @@ func (p *Process) Run() (err error) {
 			}
 		}
 
-		// Wait for all request handling goroutines to complete
+		// Wait for encoder goroutine to finish and handle any errors
 		deferErr = eg.Wait()
 		if deferErr != nil {
 			if err == nil {
@@ -136,79 +146,58 @@ func (p *Process) Run() (err error) {
 				err = errors.Join(err, deferErr)
 			}
 		}
-
-		// Close response channel to signal encoder goroutine to exit
-		close(resCh)
-
-		// Wait for encoder goroutine to finish and handle any errors
-		egErr := encodeEg.Wait()
-		if egErr != nil {
-			if err == nil {
-				err = egErr
-			} else {
-				err = errors.Join(err, egErr)
-			}
-		}
 	}()
 
-	// Start encoder goroutine to handle response writing
-	encodeEg.Go(func() error {
-		return p.encodeWorker(resCh)
-	})
 	// Send initial response with supported commands
 	resCh <- &Response{
 		ID:            0,
 		KnownCommands: p.knownCommands(),
 	}
+	// Start encoder goroutine to handle response writing
+	eg.Go(func() error {
+		return p.encodeWorker(w, resCh)
+	})
 
-	// Create JSON decoder for reading requests from stdin
-	decoder := json.NewDecoder(bufio.NewReader(os.Stdin))
-	// Main processing loop for handling requests
-	for {
-		// Decode incoming JSON request
-		var req Request
-		err := decoder.Decode(&req)
+	// Start decoder loop to handle request processing
+	err = p.decodeWorker(ctx, r, func(ctx context.Context, req *Request) error {
+		// Create response with matching ID
+		res := Response{}
+		err := p.handle(ctx, req, &res)
 		if err != nil {
-			// Exit normally on EOF, otherwise return error
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return fmt.Errorf("decode request: %w", err)
+			res.Err = err.Error()
+		}
+		res.ID = req.ID
+
+		// Send response or handle context cancellation
+		select {
+		case resCh <- &res:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 
-		// Handle each request in a separate goroutine
-		eg.Go(func() error {
-			// Create response with matching ID
-			res := Response{ID: req.ID}
-			err := p.handle(ctx, &req, &res)
-			if err != nil {
-				res.Err = err.Error()
-			}
-
-			// Send response or handle context cancellation
-			select {
-			case resCh <- &res:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-
-			return nil
-		})
+		return nil
+	})
+	if err != nil {
+		err = fmt.Errorf("decode worker: %w", err)
+		return
 	}
+
+	return
 }
 
 // knownCommands returns a list of commands supported by this Process instance
 // The supported commands are determined by the presence of their respective handlers
 func (p *Process) knownCommands() []Cmd {
-	commands := make([]Cmd, 0)
+	commands := make([]Cmd, 0, 3)
+
+	// Always support the close command
+	commands = append(commands, CmdClose)
+
 	if p.getHandler != nil {
 		commands = append(commands, CmdGet)
 	}
 	if p.pushHandler != nil {
 		commands = append(commands, CmdPut)
-	}
-	if p.closeHandler != nil {
-		commands = append(commands, CmdClose)
 	}
 
 	return commands
@@ -216,8 +205,8 @@ func (p *Process) knownCommands() []Cmd {
 
 // encodeWorker handles the encoding and writing of responses to stdout
 // It runs in a separate goroutine and processes responses from the response channel
-func (p *Process) encodeWorker(ch <-chan *Response) error {
-	bw := bufio.NewWriter(os.Stdout)
+func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
+	bw := bufio.NewWriter(w)
 	defer bw.Flush()
 	encoder := json.NewEncoder(bw)
 
@@ -234,6 +223,96 @@ func (p *Process) encodeWorker(ch <-chan *Response) error {
 	}
 
 	return nil
+}
+
+// decodeWorker handles the decoding and processing of requests from stdin
+// It reads requests from the provided reader and calls the handler for each request
+func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(context.Context, *Request) error) (err error) {
+	eg, ctx := errgroup.WithContext(ctx)
+	defer func() {
+		deferErr := eg.Wait()
+		if deferErr != nil {
+			if err == nil {
+				err = deferErr
+			} else {
+				err = errors.Join(err, deferErr)
+			}
+		}
+	}()
+
+	dr := myio.NewDelimReader(bufio.NewReader(r), '\n')
+	decoder := json.NewDecoder(dr)
+
+	for {
+		err = dr.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+				return
+			}
+			err = fmt.Errorf("next request: %w", err)
+			return
+		}
+
+		var req Request
+		err = decoder.Decode(&req)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+				return
+			}
+
+			err = fmt.Errorf("decode request: %w", err)
+			return
+		}
+
+		err = dr.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+				return
+			}
+			err = fmt.Errorf("next request skip: %w", err)
+			return
+		}
+
+		_, err = io.Copy(io.Discard, dr)
+		if err != nil {
+			err = fmt.Errorf("skip request delimiter: %w", err)
+			return
+		}
+
+		if req.Command == CmdPut && req.BodySize > 0 {
+			err = dr.Next()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					err = nil
+					return
+				}
+				err = fmt.Errorf("next request body: %w", err)
+				return
+			}
+
+			buf := bytes.NewBuffer(make([]byte, 0, req.BodySize))
+			_, err = io.Copy(buf, base64.NewDecoder(base64.StdEncoding, myio.NewSkipCharReader(dr, '"')))
+			if err != nil && !errors.Is(err, io.EOF) {
+				err = fmt.Errorf("read request body: %w", err)
+				return
+			}
+
+			if buf.Len() != int(req.BodySize) {
+				err = fmt.Errorf("read request body: expected %d bytes, got %d", req.BodySize, buf.Len())
+				return
+			}
+
+			// Wrap the request body reader with a limited reader to prevent reading more than expected
+			req.Body = buf
+		}
+
+		eg.Go(func() error {
+			return handler(ctx, &req)
+		})
+	}
 }
 
 // handle processes individual requests based on their command type
