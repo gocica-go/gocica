@@ -12,13 +12,13 @@ import (
 
 type Gocica struct {
 	logger    log.Logger
-	backend   backend.Backend
+	backend   *backend.ConbinedBackend
 	hitCount  uint64
 	missCount uint64
 	putCount  uint64
 }
 
-func NewGocica(logger log.Logger, backend backend.Backend) *Gocica {
+func NewGocica(logger log.Logger, backend *backend.ConbinedBackend) *Gocica {
 	return &Gocica{logger: logger, backend: backend}
 }
 
@@ -30,7 +30,7 @@ func (g *Gocica) Get(ctx context.Context, req *protocol.Request, res *protocol.R
 
 	if diskPath == "" || meta == nil {
 		atomic.AddUint64(&g.missCount, 1)
-		g.logger.Debugf("action %s not found", req.ActionID)
+		g.logger.Debugf("action %s not found(diskPath: %s, meta: %v)", req.ActionID, diskPath, meta)
 		res.Miss = true
 		return nil
 	}

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package gocica.v1;
+
+option go_package = "github.com/mazrean/gocica/proto/gocica/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// IndexEntry is a single entry in the index.
+message IndexEntry {
+  string output_id = 1;
+  int64 size = 2;
+  int64 timenano = 3;
+  google.protobuf.Timestamp last_used_at = 4;
+}
+
+// IndexEntryMap is a map of IndexEntry.
+message IndexEntryMap {
+  map<string, IndexEntry> entries = 1;
+}

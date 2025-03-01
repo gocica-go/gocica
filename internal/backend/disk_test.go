@@ -5,43 +5,60 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/mazrean/gocica/log"
 )
-
-// Ignore Timenano field in comparisons
-var ignoreTimenanoCmp = cmpopts.IgnoreFields(MetaData{}, "Timenano")
 
 func TestNewDisk(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		isMemory bool
-		wantErr  bool
-		setup    func(t *testing.T) string
+		name          string
+		wantErr       bool
+		wantObjectMap map[string]struct{}
+		setup         func(t *testing.T) string
 	}{
 		{
-			name:     "normal mode initialization",
-			isMemory: false,
+			name: "normal mode initialization",
 			setup: func(t *testing.T) string {
 				return t.TempDir()
 			},
+			wantObjectMap: map[string]struct{}{},
 		},
 		{
-			name:     "memory mode initialization",
-			isMemory: true,
+			name: "one object in normal mode",
 			setup: func(t *testing.T) string {
-				return t.TempDir()
+				dir := t.TempDir()
+				if _, err := os.Create(filepath.Join(dir, "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2-QO3Br5W5e3U0=")); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			wantObjectMap: map[string]struct{}{
+				"mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2/QO3Br5W5e3U0=": {},
 			},
 		},
 		{
-			name:     "error on directory creation",
-			isMemory: false,
-			wantErr:  true,
+			name: "ignore non-object files in normal mode",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				if _, err := os.Create(filepath.Join(dir, "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0=")); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Create(filepath.Join(dir, "r-empty-file")); err != nil {
+					t.Fatal(err)
+				}
+				return dir
+			},
+			wantObjectMap: map[string]struct{}{
+				"mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0=": {},
+			},
+		},
+		{
+			name:    "error on directory creation",
+			wantErr: true,
 			setup: func(t *testing.T) string {
 				dir := t.TempDir()
 				if err := os.Chmod(dir, 0500); err != nil {
@@ -55,7 +72,7 @@ func TestNewDisk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := tt.setup(t)
-			disk, err := NewDisk(dir, tt.isMemory)
+			disk, err := NewDisk(log.DefaultLogger, dir)
 
 			if tt.wantErr {
 				if err == nil {
@@ -72,16 +89,8 @@ func TestNewDisk(t *testing.T) {
 				t.Fatal("disk is nil")
 			}
 
-			if tt.isMemory && disk.actionMap == nil {
-				t.Error("actionMap should not be nil in memory mode")
-			} else if !tt.isMemory && disk.actionMap != nil {
-				t.Error("actionMap should be nil in normal mode")
-			}
-
-			if !tt.isMemory {
-				if _, err := os.Stat(filepath.Join(dir, "r-empty-file")); err != nil {
-					t.Error("empty file should exist:", err)
-				}
+			if diff := cmp.Diff(tt.wantObjectMap, disk.objectMap); diff != "" {
+				t.Errorf("object map mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -91,121 +100,65 @@ func TestDisk_Get(t *testing.T) {
 	t.Parallel()
 
 	const (
-		actionID      = "eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc="
-		outputID      = "mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0="
-		path          = "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0="
-		emptyFilePath = "r-empty-file"
+		outputID = "mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2/QO3Br5W5e3U0="
+		path     = "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2-QO3Br5W5e3U0="
 	)
-	var (
-		emptyData    = []byte{}
-		nonEmptyData = []byte("test data")
-	)
+	testData := []byte("test data")
 
 	tests := []struct {
 		name      string
-		isMemory  bool
 		isExist   bool
+		isBefore  bool
 		setupData []byte
 		want      struct {
 			path string
-			meta *MetaData
 			err  error
 		}
 	}{
 		{
-			name:      "normal mode - existing file",
-			isMemory:  false,
+			name:      "put file",
 			isExist:   true,
-			setupData: nonEmptyData,
+			isBefore:  false,
+			setupData: testData,
 			want: struct {
 				path string
-				meta *MetaData
 				err  error
 			}{
 				path: path,
-				meta: &MetaData{
-					OutputID: outputID,
-					Size:     int64(len(nonEmptyData)),
-				},
 			},
 		},
 		{
-			name:      "normal mode - empty file",
-			isMemory:  false,
+			name:      "existing file",
 			isExist:   true,
-			setupData: emptyData,
+			isBefore:  true,
+			setupData: testData,
 			want: struct {
 				path string
-				meta *MetaData
-				err  error
-			}{
-				path: emptyFilePath,
-				meta: &MetaData{
-					OutputID: outputID,
-					Size:     0,
-				},
-			},
-		},
-		{
-			name:     "normal mode - non-existent file",
-			isMemory: false,
-			isExist:  false,
-			want: struct {
-				path string
-				meta *MetaData
-				err  error
-			}{},
-		},
-		{
-			name:      "memory mode - existing file",
-			isMemory:  true,
-			isExist:   true,
-			setupData: nonEmptyData,
-			want: struct {
-				path string
-				meta *MetaData
 				err  error
 			}{
 				path: path,
-				meta: &MetaData{
-					OutputID: outputID,
-					Size:     int64(len(nonEmptyData)),
-				},
 			},
 		},
 		{
-			name:     "memory mode - non-existent file",
-			isMemory: true,
-			isExist:  false,
+			name:    "normal mode - non-existent file",
+			isExist: false,
 			want: struct {
 				path string
-				meta *MetaData
 				err  error
 			}{},
-		},
-		{
-			name:      "memory mode - empty file",
-			isMemory:  true,
-			isExist:   true,
-			setupData: emptyData,
-			want: struct {
-				path string
-				meta *MetaData
-				err  error
-			}{
-				path: emptyFilePath,
-				meta: &MetaData{
-					OutputID: outputID,
-					Size:     0,
-				},
-			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(dir, tt.isMemory)
+			if tt.isBefore {
+				if _, err := os.Create(filepath.Join(dir, path)); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			disk, err := NewDisk(log.DefaultLogger, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -213,26 +166,16 @@ func TestDisk_Get(t *testing.T) {
 			ctx := context.Background()
 
 			if tt.isExist {
-				_, err = disk.Put(ctx, actionID, outputID, int64(len(tt.setupData)), bytes.NewReader(tt.setupData))
+				_, err = disk.Put(ctx, outputID, int64(len(tt.setupData)), bytes.NewReader(tt.setupData))
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 
-			gotPath, gotMeta, err := disk.Get(ctx, actionID)
+			gotPath, err := disk.Get(ctx, outputID)
 
 			if diff := cmp.Diff(tt.want.err, err); diff != "" {
 				t.Errorf("error mismatch (-want +got):\n%s", diff)
-			}
-
-			if tt.want.meta == nil {
-				if gotMeta != nil {
-					t.Error("expected nil metadata but got non-nil")
-				}
-			} else {
-				if diff := cmp.Diff(tt.want.meta, gotMeta, ignoreTimenanoCmp); diff != "" {
-					t.Errorf("metadata mismatch (-want +got):\n%s", diff)
-				}
 			}
 
 			if tt.want.path == "" {
@@ -252,10 +195,8 @@ func TestDisk_Put(t *testing.T) {
 	t.Parallel()
 
 	const (
-		actionID      = "eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc="
-		outputID      = "mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0="
-		path          = "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0="
-		emptyFilePath = "r-empty-file"
+		outputID = "mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0="
+		path     = "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0="
 	)
 	var (
 		emptyData    = []byte{}
@@ -263,18 +204,16 @@ func TestDisk_Put(t *testing.T) {
 	)
 
 	tests := []struct {
-		name     string
-		isMemory bool
-		data     []byte
-		want     struct {
+		name string
+		data []byte
+		want struct {
 			path string
 			err  error
 		}
 	}{
 		{
-			name:     "normal mode - non-empty data",
-			isMemory: false,
-			data:     nonEmptyData,
+			name: "normal mode - non-empty data",
+			data: nonEmptyData,
 			want: struct {
 				path string
 				err  error
@@ -283,36 +222,13 @@ func TestDisk_Put(t *testing.T) {
 			},
 		},
 		{
-			name:     "normal mode - empty data",
-			isMemory: false,
-			data:     emptyData,
-			want: struct {
-				path string
-				err  error
-			}{
-				path: emptyFilePath,
-			},
-		},
-		{
-			name:     "memory mode - non-empty data",
-			isMemory: true,
-			data:     nonEmptyData,
+			name: "normal mode - empty data",
+			data: emptyData,
 			want: struct {
 				path string
 				err  error
 			}{
 				path: path,
-			},
-		},
-		{
-			name:     "memory mode - empty data",
-			isMemory: true,
-			data:     emptyData,
-			want: struct {
-				path string
-				err  error
-			}{
-				path: emptyFilePath,
 			},
 		},
 	}
@@ -320,12 +236,12 @@ func TestDisk_Put(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(dir, tt.isMemory)
+			disk, err := NewDisk(log.DefaultLogger, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			gotPath, err := disk.Put(context.Background(), actionID, outputID, int64(len(tt.data)), bytes.NewReader(tt.data))
+			gotPath, err := disk.Put(context.Background(), outputID, int64(len(tt.data)), bytes.NewReader(tt.data))
 
 			if diff := cmp.Diff(tt.want.err, err); diff != "" {
 				t.Errorf("error mismatch (-want +got):\n%s", diff)
@@ -340,78 +256,6 @@ func TestDisk_Put(t *testing.T) {
 			}
 
 			content, err := os.ReadFile(gotPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if diff := cmp.Diff(tt.data, content); diff != "" {
-				t.Errorf("content mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-func TestDisk_writeAtomic(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		path     string
-		data     []byte
-		wantSize int64
-		isErr    bool
-	}{
-		{
-			name:     "successful write",
-			data:     []byte("test data"),
-			wantSize: 9,
-		},
-		{
-			name:     "empty data",
-			data:     []byte{},
-			wantSize: 0,
-		},
-		{
-			name:  "invalid path",
-			path:  strings.Repeat("a", 1000),
-			data:  []byte("test"),
-			isErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			disk, err := NewDisk(dir, false)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			destPath := tt.path
-			if destPath == "" {
-				destPath = filepath.Join(dir, "test-file")
-			} else {
-				destPath = filepath.Join(dir, tt.path)
-			}
-
-			gotSize, err := disk.writeAtomic(destPath, bytes.NewReader(tt.data))
-
-			if tt.isErr {
-				if err == nil {
-					t.Error("expected error but got nil")
-				}
-				return
-			}
-
-			if err != nil {
-				return
-			}
-
-			if diff := cmp.Diff(tt.wantSize, gotSize); diff != "" {
-				t.Errorf("size mismatch (-want +got):\n%s", diff)
-			}
-
-			content, err := os.ReadFile(destPath)
 			if err != nil {
 				t.Fatal(err)
 			}

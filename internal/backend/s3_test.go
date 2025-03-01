@@ -48,12 +48,7 @@ func TestMain(m *testing.M) {
 			fmt.Sprintf("MINIO_ROOT_PASSWORD=%s", testPassword),
 			fmt.Sprintf("MINIO_REGION=%s", testRegion),
 		},
-		Cmd:          []string{"server", "/data", "--console-address", ":9001"},
-		ExposedPorts: []string{"9000/tcp", "9001/tcp"},
-		PortBindings: map[docker.Port][]docker.PortBinding{
-			"9000/tcp": {{HostIP: "", HostPort: "9000"}},
-			"9001/tcp": {{HostIP: "", HostPort: "9001"}},
-		},
+		Cmd: []string{"server", "/data"},
 	}
 	resource, err = pool.RunWithOptions(opts, func(config *docker.HostConfig) {
 		config.AutoRemove = true
@@ -64,11 +59,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatalf("Failed to start MinIO container: %s", err)
 	}
-	/*defer func() {
+	defer func() {
 		if err := pool.Purge(resource); err != nil {
 			log.Printf("Failed to purge MinIO container: %s", err)
 		}
-	}()*/
+	}()
 
 	endpoint = fmt.Sprintf("localhost:%s", resource.GetPort("9000/tcp"))
 

@@ -17,9 +17,8 @@ import (
 
 // CLI represents command line options and configuration file values
 var CLI struct {
-	Dir      string `kong:"optional,help='Directory to store data'" env:"GOCICA_DIR"`
+	Dir      string `kong:"optional,help='Directory to store cache files'" env:"GOCICA_DIR"`
 	LogLevel string `kong:"optional,default=info,enum='debug,info,error,none',help='Log level'" env:"GOCICA_LOG_LEVEL"`
-	MemMode  bool   `kong:"optional,default=false,help='Use memory database'" env:"GOCICA_MEM_MODE"`
 }
 
 // loadConfig loads and parses configuration from command line arguments and config files
@@ -92,14 +91,21 @@ func main() {
 	}
 
 	// Initialize backend storage
-	backend, err := backend.NewDisk(CLI.Dir, CLI.MemMode)
+	diskBackend, err := backend.NewDisk(logger, CLI.Dir)
 	if err != nil {
 		logger.Errorf("unexpected error: failed to create backend: %v", err)
 		os.Exit(1)
 	}
 
+	// Initialize combined backend
+	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend)
+	if err != nil {
+		logger.Errorf("unexpected error: failed to create combined backend: %v", err)
+		os.Exit(1)
+	}
+
 	// Create application instance
-	app := internal.NewGocica(logger, backend)
+	app := internal.NewGocica(logger, combinedBackend)
 
 	// Initialize and run process
 	process := protocol.NewProcess(

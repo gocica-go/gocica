@@ -285,6 +285,8 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			return
 		}
 
+		p.logger.Debugf("received request: %+v", req)
+
 		if req.Command == CmdPut && req.BodySize > 0 {
 			err = dr.Next()
 			if err != nil {
@@ -312,7 +314,6 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			req.Body = buf
 		}
 
-		p.logger.Debugf("received request: %+v", req)
 		eg.Go(func() error {
 			return handler(ctx, &req)
 		})
