@@ -13,18 +13,10 @@ import (
 
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
-	"github.com/mazrean/gocica/internal/pkg/log"
+	"github.com/mazrean/gocica/log"
 
 	"golang.org/x/sync/errgroup"
 )
-
-// Logger defines the interface for logging operations used throughout the protocol
-// It provides methods for different log levels: debug, info, and error
-type Logger interface {
-	Debugf(format string, args ...any)
-	Infof(format string, args ...any)
-	Errorf(format string, args ...any)
-}
 
 // Process represents the main protocol handler that manages request/response cycles
 // It handles different types of commands (get, put, close) and manages communication
@@ -32,8 +24,9 @@ type Process struct {
 	getHandler         func(context.Context, *Request, *Response) error
 	putHandler         func(context.Context, *Request, *Response) error
 	closeHandler       func() error
-	logger             Logger
+	logger             log.Logger
 	responseBufferSize int
+	debugStdinLeakFile string
 }
 
 // processOption holds the configuration options for a Process instance
@@ -41,8 +34,9 @@ type processOption struct {
 	getHandler         func(context.Context, *Request, *Response) error
 	putHandler         func(context.Context, *Request, *Response) error
 	closeHandler       func() error
-	logger             Logger
+	logger             log.Logger
 	responseBufferSize int
+	debugStdinLeakFile string
 }
 
 // ProcessOption defines a function type for configuring Process instances
@@ -74,7 +68,7 @@ func WithCloseHandler(handler func() error) ProcessOption {
 
 // WithLogger sets the logger instance for the Process
 // If not set, a default logger will be used
-func WithLogger(logger Logger) ProcessOption {
+func WithLogger(logger log.Logger) ProcessOption {
 	return func(o *processOption) {
 		o.logger = logger
 	}
@@ -90,11 +84,17 @@ func WithResponseBufferSize(size int) ProcessOption {
 	}
 }
 
+func WithDebugStdinLeakFile(file string) ProcessOption {
+	return func(o *processOption) {
+		o.debugStdinLeakFile = file
+	}
+}
+
 // NewProcess creates a new Process instance with the given options
 // It initializes the process with default values and applies the provided options
 func NewProcess(options ...ProcessOption) *Process {
 	o := &processOption{
-		logger:             log.NewLogger(log.Info),
+		logger:             log.DefaultLogger,
 		responseBufferSize: 100, // デフォルト値
 	}
 	for _, option := range options {
@@ -107,6 +107,7 @@ func NewProcess(options ...ProcessOption) *Process {
 		closeHandler:       o.closeHandler,
 		logger:             o.logger,
 		responseBufferSize: o.responseBufferSize,
+		debugStdinLeakFile: o.debugStdinLeakFile,
 	}
 }
 
@@ -114,7 +115,18 @@ func NewProcess(options ...ProcessOption) *Process {
 // It handles JSON requests from stdin and writes responses to stdout
 // The process continues until EOF is received or an error occurs
 func (p *Process) Run() error {
-	return p.run(os.Stdout, os.Stdin)
+	var r io.Reader = os.Stdin
+	if p.debugStdinLeakFile != "" {
+		stdinLeakFile, err := os.Create(p.debugStdinLeakFile)
+		if err != nil {
+			p.logger.Errorf("failed to create stdin leak file: %v", err)
+		}
+		defer stdinLeakFile.Close()
+
+		r = io.TeeReader(r, stdinLeakFile)
+	}
+
+	return p.run(os.Stdout, r)
 }
 
 func (p *Process) run(w io.Writer, r io.Reader) (err error) {
@@ -130,6 +142,7 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		// Perform cleanup and collect any errors that occur
 		deferErr := p.close()
 		if deferErr != nil {
+			deferErr = fmt.Errorf("close process: %w", deferErr)
 			if err == nil {
 				err = deferErr
 			} else {
@@ -140,6 +153,7 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		// Wait for encoder goroutine to finish and handle any errors
 		deferErr = eg.Wait()
 		if deferErr != nil {
+			deferErr = fmt.Errorf("wait for encoder: %w", deferErr)
 			if err == nil {
 				err = deferErr
 			} else {
@@ -212,6 +226,7 @@ func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
 	encoder := json.NewEncoder(bw)
 
 	for resp := range ch {
+		p.logger.Debugf("sending response: %+v", resp)
 		err := encoder.Encode(resp)
 		if err != nil {
 			p.logger.Errorf("encode response(%+v): %v", resp, err)
@@ -235,6 +250,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 	defer func() {
 		deferErr := eg.Wait()
 		if deferErr != nil {
+			deferErr = fmt.Errorf("wait for handler: %w", deferErr)
 			if err == nil {
 				err = deferErr
 			} else {
@@ -269,22 +285,6 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			return
 		}
 
-		err = dr.Next()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				err = nil
-				return
-			}
-			err = fmt.Errorf("next request skip: %w", err)
-			return
-		}
-
-		_, err = io.Copy(io.Discard, dr)
-		if err != nil {
-			err = fmt.Errorf("skip request delimiter: %w", err)
-			return
-		}
-
 		if req.Command == CmdPut && req.BodySize > 0 {
 			err = dr.Next()
 			if err != nil {
@@ -312,6 +312,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			req.Body = buf
 		}
 
+		p.logger.Debugf("received request: %+v", req)
 		eg.Go(func() error {
 			return handler(ctx, &req)
 		})
