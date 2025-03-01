@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -128,15 +127,11 @@ func (d *Disk) Put(ctx context.Context, actionID, outputID string, size int64, b
 }
 
 func (d *Disk) objectFilePath(id string) string {
-	return filepath.Join(d.rootPath, fmt.Sprintf("o-%s", d.encodeID(id)))
+	return filepath.Join(d.rootPath, fmt.Sprintf("o-%s", encodeID(id)))
 }
 
 func (d *Disk) actionFilePath(id string) string {
-	return filepath.Join(d.rootPath, fmt.Sprintf("a-%s", d.encodeID(id)))
-}
-
-func (*Disk) encodeID(id string) string {
-	return strings.ReplaceAll(id, "/", "-")
+	return filepath.Join(d.rootPath, fmt.Sprintf("a-%s", encodeID(id)))
 }
 
 func (d *Disk) writeTemp(dest string, r io.Reader) (path string, size int64, err error) {
