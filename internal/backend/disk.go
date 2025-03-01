@@ -69,11 +69,15 @@ func (d *Disk) Get(ctx context.Context, actionID string) (string, *MetaData, err
 			return "", nil, fmt.Errorf("unmarshal index entry: %w", err)
 		}
 	} else {
+		var ok bool
 		func() {
 			d.actionMapLocker.RLock()
 			defer d.actionMapLocker.RUnlock()
-			indexEntry = d.actionMap[actionID]
+			indexEntry, ok = d.actionMap[actionID]
 		}()
+		if !ok {
+			return "", nil, nil
+		}
 	}
 
 	return indexEntry.DiskPath, &MetaData{
@@ -120,7 +124,7 @@ func (d *Disk) Put(ctx context.Context, actionID, outputID string, size int64, b
 		}()
 	}
 
-	return filepath.Join(d.rootPath, outputFilePath), nil
+	return outputFilePath, nil
 }
 
 func (d *Disk) objectFilePath(id string) string {
