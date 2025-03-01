@@ -1,0 +1,5 @@
+{
+  "dir": "/path/to/cache",
+  "logLevel": "info",
+  "memMode": false
+}

@@ -3,6 +3,7 @@ module github.com/mazrean/gocica
 go 1.24.0
 
 require (
+	github.com/alecthomas/kong v1.8.1
 	github.com/bytedance/sonic v1.12.9
 	github.com/goccy/go-json v0.10.5
 	github.com/google/go-cmp v0.7.0
