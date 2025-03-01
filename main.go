@@ -65,7 +65,6 @@ func main() {
 		protocol.WithPutHandler(app.Put),
 		protocol.WithCloseHandler(app.Close),
 		protocol.WithLogger(logger),
-		protocol.WithDebugStdinLeakFile("stdin-leak.log"),
 	)
 
 	if err := process.Run(); err != nil {
