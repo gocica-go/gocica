@@ -105,19 +105,11 @@ func (s *S3) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
 	return indexEntryMap.Entries, nil
 }
 
-func (s *S3) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	indexEntryMap := &v1.IndexEntryMap{
-		Entries: metaDataMap,
-	}
-	data, err := proto.Marshal(indexEntryMap)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
+func (s *S3) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
 	opts := minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
 	}
-	_, err = s.client.PutObject(ctx, s.bucket, "r-metadata", bytes.NewReader(data), int64(len(data)), opts)
+	_, err := s.client.PutObject(ctx, s.bucket, s3MetadataObjectName, bytes.NewReader(metaDataMapBuf), int64(len(metaDataMapBuf)), opts)
 	if err != nil {
 		return fmt.Errorf("put metadata object: %w", err)
 	}

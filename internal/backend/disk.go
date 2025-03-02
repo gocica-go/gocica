@@ -55,6 +55,8 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 		}
 	}
 
+	logger.Infof("disk backend initialized.")
+
 	disk := &Disk{
 		logger:    logger,
 		rootPath:  dir,
@@ -81,16 +83,8 @@ func (d *Disk) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) 
 	return indexEntryMap.Entries, nil
 }
 
-func (d *Disk) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	indexEntryMap := &v1.IndexEntryMap{
-		Entries: metaDataMap,
-	}
-	buf, err := proto.Marshal(indexEntryMap)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	err = os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), buf, 0644)
+func (d *Disk) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
+	err := os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), metaDataMapBuf, 0644)
 	if err != nil {
 		return fmt.Errorf("write metadata file: %w", err)
 	}

@@ -321,7 +321,15 @@ func TestWriteMetaData(t *testing.T) {
 				_ = s3Inst.client.RemoveObject(context.Background(), testBucket, s3MetadataObjectName, minio.RemoveObjectOptions{})
 			}
 
-			err := s3Inst.WriteMetaData(context.Background(), tc.metaMap)
+			indexEntryMap := v1.IndexEntryMap{
+				Entries: tc.metaMap,
+			}
+			buf, err := proto.Marshal(&indexEntryMap)
+			if err != nil {
+				t.Fatalf("proto.Marshal failed: %v", err)
+			}
+
+			err = s3Inst.WriteMetaData(context.Background(), buf)
 			if err != nil {
 				t.Errorf("WriteMetaData returned error: %v", err)
 			}
@@ -348,7 +356,7 @@ func TestWriteMetaData(t *testing.T) {
 				t.Fatalf("Failed to read metadata object: %v", err)
 			}
 
-			indexEntryMap := v1.IndexEntryMap{}
+			indexEntryMap = v1.IndexEntryMap{}
 			if err := proto.Unmarshal(data, &indexEntryMap); err != nil {
 				t.Fatalf("Failed to unmarshal metadata: %v", err)
 			}

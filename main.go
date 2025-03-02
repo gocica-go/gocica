@@ -129,6 +129,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := CLI.Dev.StartProfiling(); err != nil {
+		logger.Errorf("failed to start profiling: %v", err)
+	}
+	defer CLI.Dev.StopProfiling()
+
 	// Set log level
 	switch CLI.LogLevel {
 	case "none":
