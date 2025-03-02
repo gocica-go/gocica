@@ -75,6 +75,36 @@ func loadConfig(logger log.Logger) (*kong.Context, error) {
 	return ctx, nil
 }
 
+func createBackend(logger log.Logger) (*backend.ConbinedBackend, error) {
+	// Initialize backend storage
+	diskBackend, err := backend.NewDisk(logger, CLI.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create backend: %w", err)
+	}
+
+	// Initialize remote backend
+	remoteBackend, err := backend.NewS3(
+		CLI.S3.Endpoint,
+		CLI.S3.Region,
+		CLI.S3.AccessKeyID,
+		CLI.S3.SecretAccessKey,
+		CLI.S3.Bucket,
+		!CLI.S3.DisableSSL,
+		CLI.S3.UsePathStyle,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create remote backend: %w", err)
+	}
+
+	// Initialize combined backend
+	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend, remoteBackend)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create combined backend: %w", err)
+	}
+
+	return combinedBackend, nil
+}
+
 func main() {
 	// Initialize default logger with info level
 	logger := log.DefaultLogger
@@ -99,37 +129,15 @@ func main() {
 		logger.Infof("invalid log level: %s. ignore log level setting.", CLI.LogLevel)
 	}
 
-	// Initialize backend storage
-	diskBackend, err := backend.NewDisk(logger, CLI.Dir)
-	if err != nil {
-		logger.Errorf("unexpected error: failed to create backend: %v", err)
-		os.Exit(1)
-	}
-
-	// Initialize remote backend
-	remoteBackend, err := backend.NewS3(
-		CLI.S3.Endpoint,
-		CLI.S3.Region,
-		CLI.S3.AccessKeyID,
-		CLI.S3.SecretAccessKey,
-		CLI.S3.Bucket,
-		!CLI.S3.DisableSSL,
-		CLI.S3.UsePathStyle,
-	)
-	if err != nil {
-		logger.Errorf("unexpected error: failed to create remote backend: %v", err)
-		os.Exit(1)
-	}
-
-	// Initialize combined backend
-	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend, remoteBackend)
+	// Initialize backend
+	backend, err := createBackend(logger)
 	if err != nil {
 		logger.Errorf("unexpected error: failed to create combined backend: %v", err)
 		os.Exit(1)
 	}
 
 	// Create application instance
-	app := internal.NewGocica(logger, combinedBackend)
+	app := internal.NewGocica(logger, backend)
 
 	// Initialize and run process
 	process := protocol.NewProcess(
