@@ -64,10 +64,12 @@ func TestMain(m *testing.M) {
 		log.DefaultLogger.Errorf("Failed to start MinIO container: %s", err)
 		os.Exit(1)
 	}
+	var code int
 	defer func() {
 		if err := pool.Purge(resource); err != nil {
 			log.DefaultLogger.Errorf("Failed to purge MinIO container: %s", err)
 		}
+		os.Exit(code)
 	}()
 
 	endpoint = fmt.Sprintf("localhost:%s", resource.GetPort("9000/tcp"))
@@ -95,9 +97,7 @@ func TestMain(m *testing.M) {
 		log.DefaultLogger.Errorf("Failed to connect to MinIO: %s", err)
 	}
 
-	code := m.Run()
-
-	os.Exit(code)
+	code = m.Run()
 }
 
 // newS3Instance creates an S3 instance for testing.
@@ -197,7 +197,7 @@ func TestMetaData(t *testing.T) {
 	}{
 		{
 			name: "No metadata object exists",
-			setup: func(t *testing.T) {
+			setup: func(_ *testing.T) {
 				// Remove metadata object if it exists.
 				_ = s3Inst.client.RemoveObject(context.Background(), testBucket, "r-metadata", minio.RemoveObjectOptions{})
 			},
