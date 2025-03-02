@@ -30,7 +30,7 @@ func TestProcess_knownCommands(t *testing.T) {
 		{
 			name: "get handler only",
 			options: []ProcessOption{
-				WithGetHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithGetHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
 			},
@@ -39,7 +39,7 @@ func TestProcess_knownCommands(t *testing.T) {
 		{
 			name: "push handler only",
 			options: []ProcessOption{
-				WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithPutHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
 			},
@@ -57,10 +57,10 @@ func TestProcess_knownCommands(t *testing.T) {
 		{
 			name: "all handlers",
 			options: []ProcessOption{
-				WithGetHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithGetHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
-				WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithPutHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
 				WithCloseHandler(func() error {
@@ -122,7 +122,7 @@ func TestProcess_handle(t *testing.T) {
 		{
 			name: "successful get handler",
 			options: []ProcessOption{
-				WithGetHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithGetHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
 			},
@@ -132,7 +132,7 @@ func TestProcess_handle(t *testing.T) {
 		{
 			name: "successful put handler",
 			options: []ProcessOption{
-				WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
+				WithPutHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
 			},
@@ -157,17 +157,18 @@ func TestProcess_handle(t *testing.T) {
 			options := make([]ProcessOption, 0, len(tt.options))
 			options = append(options, tt.options...)
 
-			if tt.wantCalled == "get" {
-				options = append(options, WithGetHandler(func(ctx context.Context, req *Request, res *Response) error {
+			switch tt.wantCalled {
+			case "get":
+				options = append(options, WithGetHandler(func(context.Context, *Request, *Response) error {
 					called = "get"
 					return nil
 				}))
-			} else if tt.wantCalled == "put" {
-				options = append(options, WithPutHandler(func(ctx context.Context, req *Request, res *Response) error {
+			case "put":
+				options = append(options, WithPutHandler(func(context.Context, *Request, *Response) error {
 					called = "put"
 					return nil
 				}))
-			} else if tt.wantCalled == "close" {
+			case "close":
 				options = append(options, WithCloseHandler(func() error {
 					called = "close"
 					return nil
@@ -423,7 +424,11 @@ func TestProcess_decodeWorker(t *testing.T) {
 				}
 
 				if req.BodySize > 0 {
-					defer putBody.Seek(0, io.SeekStart)
+					defer func() {
+						if _, err := putBody.Seek(0, io.SeekStart); err != nil {
+							t.Fatalf("failed to seek request body: %v", err)
+						}
+					}()
 					expectBody, err := io.ReadAll(expectReq.Body)
 					if err != nil {
 						t.Fatalf("failed to read request body: %v", err)

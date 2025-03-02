@@ -150,8 +150,7 @@ func main() {
 	// Load configuration
 	_, err := loadConfig(logger)
 	if err != nil {
-		logger.Errorf("invalid configuration: %v", err)
-		os.Exit(1)
+		panic(fmt.Errorf("invalid configuration: %w", err))
 	}
 
 	if err := CLI.Dev.StartProfiling(); err != nil {
@@ -178,7 +177,7 @@ func main() {
 	backend, err := createBackend(logger)
 	if err != nil {
 		logger.Errorf("unexpected error: failed to create combined backend: %v", err)
-		os.Exit(1)
+		panic(fmt.Errorf("failed to create combined backend: %w", err))
 	}
 
 	// Create application instance
@@ -194,6 +193,6 @@ func main() {
 
 	if err := process.Run(); err != nil {
 		logger.Errorf("unexpected error: failed to run process: %v", err)
-		os.Exit(1)
+		panic(fmt.Errorf("failed to run process: %w", err))
 	}
 }

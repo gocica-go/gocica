@@ -66,7 +66,7 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 	return disk, nil
 }
 
-func (d *Disk) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
+func (d *Disk) MetaData(context.Context) (map[string]*v1.IndexEntry, error) {
 	buf, err := os.ReadFile(filepath.Join(d.rootPath, metadataFilePath))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -83,8 +83,8 @@ func (d *Disk) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) 
 	return indexEntryMap.Entries, nil
 }
 
-func (d *Disk) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
-	err := os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), metaDataMapBuf, 0644)
+func (d *Disk) WriteMetaData(_ context.Context, metaDataMapBuf []byte) error {
+	err := os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), metaDataMapBuf, 0600)
 	if err != nil {
 		return fmt.Errorf("write metadata file: %w", err)
 	}
@@ -92,7 +92,7 @@ func (d *Disk) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
 	return nil
 }
 
-func (d *Disk) Get(ctx context.Context, outputID string) (diskPath string, err error) {
+func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err error) {
 	d.objectMapLocker.RLock()
 	defer d.objectMapLocker.RUnlock()
 
@@ -105,7 +105,7 @@ func (d *Disk) Get(ctx context.Context, outputID string) (diskPath string, err e
 
 var ErrSizeMismatch = errors.New("size mismatch")
 
-func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Reader) (string, error) {
+func (d *Disk) Put(_ context.Context, outputID string, size int64, body io.Reader) (string, error) {
 	defer func() {
 		_, err := io.Copy(io.Discard, body)
 		if err != nil {
@@ -159,7 +159,10 @@ func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Rea
 		return outputFilePath, nil
 	}
 
-	n := iN.(int64)
+	n, ok := iN.(int64)
+	if !ok {
+		return "", fmt.Errorf("invalid type assertion: expected int64")
+	}
 	if n != size {
 		err = fmt.Errorf("%w: expected=%d, actual=%d", ErrSizeMismatch, size, n)
 		removeErr := os.Remove(outputFilePath)

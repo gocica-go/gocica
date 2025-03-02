@@ -193,11 +193,10 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		return nil
 	})
 	if err != nil {
-		err = fmt.Errorf("decode worker: %w", err)
-		return
+		return fmt.Errorf("decode worker: %w", err)
 	}
 
-	return
+	return err
 }
 
 // knownCommands returns a list of commands supported by this Process instance
@@ -266,23 +265,21 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 		err = dr.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				err = nil
-				return
+				return nil
 			}
 			err = fmt.Errorf("next request: %w", err)
-			return
+			return err
 		}
 
 		var req Request
 		err = decoder.Decode(&req)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				err = nil
-				return
+				return nil
 			}
 
 			err = fmt.Errorf("decode request: %w", err)
-			return
+			return err
 		}
 
 		p.logger.Debugf("received request: %+v", req)
@@ -291,23 +288,19 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			err = dr.Next()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					err = nil
-					return
+					return nil
 				}
-				err = fmt.Errorf("next request body: %w", err)
-				return
+				return fmt.Errorf("next request body: %w", err)
 			}
 
 			buf := bytes.NewBuffer(make([]byte, 0, req.BodySize))
 			_, err = io.Copy(buf, base64.NewDecoder(base64.StdEncoding, myio.NewSkipCharReader(dr, '"')))
 			if err != nil && !errors.Is(err, io.EOF) {
-				err = fmt.Errorf("read request body: %w", err)
-				return
+				return fmt.Errorf("read request body: %w", err)
 			}
 
 			if buf.Len() != int(req.BodySize) {
-				err = fmt.Errorf("read request body: expected %d bytes, got %d", req.BodySize, buf.Len())
-				return
+				return fmt.Errorf("read request body: expected %d bytes, got %d", req.BodySize, buf.Len())
 			}
 
 			// Wrap the request body reader with a limited reader to prevent reading more than expected
