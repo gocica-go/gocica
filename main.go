@@ -32,6 +32,7 @@ var CLI struct {
 		DisableSSL      bool   `kong:"optional,help='Disable SSL for S3 connection',env='GOCICA_S3_DISABLE_SSL'"`
 		UsePathStyle    bool   `kong:"optional,help='Use path style for S3 connection',env='GOCICA_S3_USE_PATH_STYLE'"`
 	} `kong:"group='s3',embed,prefix='s3.'"`
+	Dev DevFlag `kong:"group='dev',embed,prefix='dev.'"`
 }
 
 // loadConfig loads and parses configuration from command line arguments and config files
