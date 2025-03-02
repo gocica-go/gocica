@@ -272,8 +272,6 @@ func TestMetaData(t *testing.T) {
 }
 
 func TestWriteMetaData(t *testing.T) {
-	t.Parallel()
-
 	s3Inst := newS3Instance(t)
 	tests := []struct {
 		name           string

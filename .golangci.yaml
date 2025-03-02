@@ -1,0 +1,34 @@
+issues:
+  exclude-dirs:
+    - internal/proto
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - revive
+    - gofmt
+    - asasalint
+    - asciicheck
+    - bidichk
+    - errname
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gocritic
+    - goheader
+    - goimports
+    - gosec
+    - misspell
+    - nakedret
+    - nilerr
+    - nosprintfhostport
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - whitespace

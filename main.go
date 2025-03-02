@@ -15,7 +15,10 @@ import (
 
 //go:generate go tool buf generate
 
-var Version = "dev"
+var (
+	version  = "dev"
+	revision = "none"
+)
 
 // CLI represents command line options and configuration file values
 var CLI struct {
@@ -62,7 +65,7 @@ func loadConfig(logger log.Logger) (*kong.Context, error) {
 		kong.Name("gocica"),
 		kong.Description("A fast GOCACHEPROG implementation for CI"),
 		kong.Configuration(kong.JSON, configPaths...),
-		kong.Vars{"version": Version},
+		kong.Vars{"version": fmt.Sprintf("%s (%s)", version, revision)},
 		kong.UsageOnError(),
 	)
 	ctx, err := parser.Parse(os.Args[1:])

@@ -3,3 +3,4 @@
 *.log
 *.prof
 /.gocica.json
+/dist
