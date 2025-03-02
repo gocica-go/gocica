@@ -10,7 +10,7 @@ import (
 type Level uint8
 
 const (
-	None Level = iota
+	Silent Level = iota
 	Error
 	Info
 	Debug
