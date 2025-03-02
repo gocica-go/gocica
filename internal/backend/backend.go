@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -22,8 +24,10 @@ type Backend interface {
 }
 
 type RemoteBackend interface {
-	Get(ctx context.Context, actionID string, w io.Writer) (meta *MetaData, err error)
-	Put(ctx context.Context, actionID string, meta *MetaData, r io.Reader) error
+	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
+	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
+	Get(ctx context.Context, objectID string, w io.Writer) error
+	Put(ctx context.Context, objectID string, size int64, r io.Reader) error
 	Close() error
 }
 
@@ -38,9 +42,10 @@ type MetaData struct {
 
 type ConbinedBackend struct {
 	logger log.Logger
+	eg     *errgroup.Group
 
-	backend Backend
-	//remote  RemoteBackend
+	local  Backend
+	remote RemoteBackend
 
 	nowTimestamp         *timestamppb.Timestamp
 	metaDataMap          map[string]*v1.IndexEntry
@@ -48,10 +53,12 @@ type ConbinedBackend struct {
 	newMetaDataMap       map[string]*v1.IndexEntry
 }
 
-func NewConbinedBackend(logger log.Logger, backend Backend) (*ConbinedBackend, error) {
+func NewConbinedBackend(logger log.Logger, local Backend, remote RemoteBackend) (*ConbinedBackend, error) {
 	conbined := &ConbinedBackend{
 		logger:       logger,
-		backend:      backend,
+		eg:           &errgroup.Group{},
+		local:        local,
+		remote:       remote,
 		nowTimestamp: timestamppb.Now(),
 	}
 
@@ -61,12 +68,25 @@ func NewConbinedBackend(logger log.Logger, backend Backend) (*ConbinedBackend, e
 }
 
 func (b *ConbinedBackend) start() {
-	metaDataMap, err := b.backend.MetaData(context.Background())
+	metaDataMap, err := b.local.MetaData(context.Background())
 	if err != nil {
 		b.logger.Errorf("parse local metadata: %v. ignore the all local cache.", err)
 	}
 
+	remoteMetaDataMap, err := b.remote.MetaData(context.Background())
+	if err != nil {
+		b.logger.Errorf("parse remote metadata: %v. ignore the all remote cache.", err)
+	}
+
 	b.metaDataMap = metaDataMap
+	for actionID, remoteMetaData := range remoteMetaDataMap {
+		localMetaData, ok := b.metaDataMap[actionID]
+		if ok && localMetaData.LastUsedAt.AsTime().After(remoteMetaData.LastUsedAt.AsTime()) {
+			continue
+		}
+
+		b.metaDataMap[actionID] = remoteMetaData
+	}
 
 	b.newMetaDataMap = make(map[string]*v1.IndexEntry, len(metaDataMap))
 	metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
@@ -83,9 +103,53 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 		return "", nil, nil
 	}
 
-	diskPath, err = b.backend.Get(ctx, indexEntry.OutputId)
+	diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
 	if err != nil {
 		return "", nil, fmt.Errorf("get local cache: %w", err)
+	}
+
+	if diskPath != "" {
+		func() {
+			b.newMetaDataMapLocker.Lock()
+			defer b.newMetaDataMapLocker.Unlock()
+			indexEntry.LastUsedAt = b.nowTimestamp
+			b.newMetaDataMap[actionID] = indexEntry
+		}()
+
+		return diskPath, &MetaData{
+			OutputID: indexEntry.OutputId,
+			Size:     indexEntry.Size,
+			Timenano: indexEntry.Timenano,
+		}, nil
+	}
+
+	eg, ctx := errgroup.WithContext(ctx)
+	pr, pw := io.Pipe()
+	eg.Go(func() error {
+		defer pw.Close()
+
+		err := b.remote.Get(ctx, indexEntry.OutputId, pw)
+		if err != nil {
+			return fmt.Errorf("get remote cache: %w", err)
+		}
+
+		return nil
+	})
+
+	diskPath, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size, pr)
+	if err != nil {
+		if errors.Is(err, ErrSizeMismatch) {
+			return "", nil, nil
+		}
+		return "", nil, fmt.Errorf("put remote cache: %w", err)
+	}
+
+	if diskPath == "" {
+		return "", nil, nil
+	}
+
+	if err := eg.Wait(); err != nil {
+		return "", nil, fmt.Errorf("wait for get remote cache: %w", err)
 	}
 
 	func() {
@@ -116,20 +180,32 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		b.newMetaDataMap[actionID] = indexEntry
 	}()
 
-	diskPath, err = b.backend.Put(ctx, outputID, size, body)
+	diskPath, err = b.local.Put(ctx, outputID, size, body)
 	if err != nil {
 		return "", fmt.Errorf("put: %w", err)
 	}
+
+	b.eg.Go(func() error {
+		if err := b.remote.Put(ctx, outputID, size, body); err != nil {
+			return fmt.Errorf("put remote cache: %w", err)
+		}
+
+		return nil
+	})
 
 	return diskPath, nil
 }
 
 func (b *ConbinedBackend) Close() error {
-	if err := b.backend.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
+	if err := b.eg.Wait(); err != nil {
+		return fmt.Errorf("wait for all tasks: %w", err)
+	}
+
+	if err := b.local.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
-	if err := b.backend.Close(); err != nil {
+	if err := b.local.Close(); err != nil {
 		return fmt.Errorf("close backend: %w", err)
 	}
 

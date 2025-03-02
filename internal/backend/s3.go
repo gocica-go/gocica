@@ -1,13 +1,19 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 
+	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"google.golang.org/protobuf/proto"
+)
+
+const (
+	s3MetadataObjectName = "r-metadata"
 )
 
 // Ensure S3 implements RemoteBackend
@@ -26,7 +32,11 @@ type S3 struct {
 // bucket: the bucket name to use
 // profile: AWS credential profile name (ignored if accessKey and secretKey are provided)
 // useSSL: whether to use SSL
-func NewS3(endpoint, region, accessKey, secretKey, bucket string, useSSL bool) (*S3, error) {
+// usePathStyle: whether to force path style
+func NewS3(
+	endpoint, region, accessKey, secretKey, bucket string,
+	useSSL, usePathStyle bool,
+) (*S3, error) {
 	var creds *credentials.Credentials
 	if accessKey != "" && secretKey != "" {
 		creds = credentials.NewStaticV4(accessKey, secretKey, "")
@@ -34,10 +44,15 @@ func NewS3(endpoint, region, accessKey, secretKey, bucket string, useSSL bool) (
 		creds = credentials.NewFileAWSCredentials("", "")
 	}
 
+	bucketLookupType := minio.BucketLookupDNS
+	if usePathStyle {
+		bucketLookupType = minio.BucketLookupPath
+	}
 	client, err := minio.New(endpoint, &minio.Options{
-		Region: region,
-		Creds:  creds,
-		Secure: useSSL,
+		Region:       region,
+		Creds:        creds,
+		Secure:       useSSL,
+		BucketLookup: bucketLookupType,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize S3 client: %w", err)
@@ -59,54 +74,73 @@ func NewS3(endpoint, region, accessKey, secretKey, bucket string, useSSL bool) (
 	}, nil
 }
 
-// Get retrieves the object associated with actionID from S3 and writes it to w.
-// It also returns the MetaData extracted from object metadata.
-func (s *S3) Get(ctx context.Context, actionID string, w io.Writer) (meta *MetaData, err error) {
-	opts := minio.GetObjectOptions{}
-	obj, err := s.client.GetObject(ctx, s.bucket, s.objectName(actionID), opts)
+func (s *S3) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, s3MetadataObjectName, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("get object: %w", err)
+		minioErr := minio.ToErrorResponse(err)
+		if minioErr.Code == "NoSuchKey" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get metadata object: %w", err)
 	}
 	defer obj.Close()
 
-	// Copy object data to w
-	_, err = io.Copy(w, obj)
+	data, err := io.ReadAll(obj)
 	if err != nil {
-		return nil, fmt.Errorf("copy object: %w", err)
+		minioErr := minio.ToErrorResponse(err)
+		if minioErr.Code == "NoSuchKey" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read metadata object: %w", err)
 	}
 
-	// Extract metadata
-	stat, err := obj.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat object: %w", err)
+	indexEntryMap := v1.IndexEntryMap{}
+	if err := proto.Unmarshal(data, &indexEntryMap); err != nil {
+		return nil, fmt.Errorf("unmarshal metadata: %w", err)
 	}
-	md := &MetaData{
-		OutputID: stat.UserMetadata["Outputid"],
-	}
-	if sizeStr, ok := stat.UserMetadata["Size"]; ok {
-		if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil {
-			md.Size = size
-		}
-	}
-	if timeStr, ok := stat.UserMetadata["Timenano"]; ok {
-		if timenano, err := strconv.ParseInt(timeStr, 10, 64); err == nil {
-			md.Timenano = timenano
-		}
-	}
-	return md, nil
+
+	return indexEntryMap.Entries, nil
 }
 
-// Put uploads data from r to S3 with the specified actionID and metadata.
-func (s *S3) Put(ctx context.Context, actionID string, meta *MetaData, r io.Reader) error {
+func (s *S3) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
+	indexEntryMap := &v1.IndexEntryMap{
+		Entries: metaDataMap,
+	}
+	data, err := proto.Marshal(indexEntryMap)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
 	opts := minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
-		UserMetadata: map[string]string{
-			"Outputid": meta.OutputID,
-			"Size":     strconv.FormatInt(meta.Size, 10),
-			"Timenano": strconv.FormatInt(meta.Timenano, 10),
-		},
 	}
-	_, err := s.client.PutObject(ctx, s.bucket, s.objectName(actionID), r, meta.Size, opts)
+	_, err = s.client.PutObject(ctx, s.bucket, "r-metadata", bytes.NewReader(data), int64(len(data)), opts)
+	if err != nil {
+		return fmt.Errorf("put metadata object: %w", err)
+	}
+
+	return nil
+}
+
+func (s *S3) Get(ctx context.Context, outputID string, w io.Writer) error {
+	opts := minio.GetObjectOptions{}
+	obj, err := s.client.GetObject(ctx, s.bucket, s.objectName(outputID), opts)
+	if err != nil {
+		return fmt.Errorf("get object: %w", err)
+	}
+	defer obj.Close()
+	_, err = io.Copy(w, obj)
+	if err != nil {
+		return fmt.Errorf("copy object: %w", err)
+	}
+	return nil
+}
+
+func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.Reader) error {
+	opts := minio.PutObjectOptions{
+		ContentType: "application/octet-stream",
+	}
+	_, err := s.client.PutObject(ctx, s.bucket, s.objectName(outputID), r, size, opts)
 	if err != nil {
 		return fmt.Errorf("upload object: %w", err)
 	}
@@ -117,7 +151,6 @@ func (s *S3) objectName(actionID string) string {
 	return fmt.Sprintf("a-%s", encodeID(actionID))
 }
 
-// Close performs any necessary cleanup. For S3, there are no resources to close.
 func (s *S3) Close() error {
 	return nil
 }

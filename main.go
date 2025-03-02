@@ -19,6 +19,15 @@ import (
 var CLI struct {
 	Dir      string `kong:"optional,help='Directory to store cache files'" env:"GOCICA_DIR"`
 	LogLevel string `kong:"optional,default=info,enum='debug,info,error,none',help='Log level'" env:"GOCICA_LOG_LEVEL"`
+	S3       struct {
+		Region          string `kong:"optional,help='AWS region'" env:"GOCICA_S3_REGION"`
+		Bucket          string `kong:"help='S3 bucket name'" env:"GOCICA_S3_BUCKET"`
+		AccessKeyID     string `kong:"optional,help='AWS access key ID'" env:"GOCICA_S3_ACCESS_KEY_ID"`
+		SecretAccessKey string `kong:"optional,help='AWS secret access key'" env:"GOCIAC_S3_SECRET_ACCESS_KEY"`
+		Endpoint        string `kong:"help='S3 endpoint'" env:"GOCICA_S3_ENDPOINT" default:"https://s3.amazonaws.com"`
+		DisableSSL      bool   `kong:"optional,help='Disable SSL for S3 connection'" env:"GOCICA_S3_DISABLE_SSL"`
+		UsePathStyle    bool   `kong:"optional,help='Use path style for S3 connection'" env:"GOCICA_S3_USE_PATH_STYLE"`
+	} `kong:"optional,help='S3 configuration'"`
 }
 
 // loadConfig loads and parses configuration from command line arguments and config files
@@ -97,8 +106,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize remote backend
+	remoteBackend, err := backend.NewS3(
+		CLI.S3.Endpoint,
+		CLI.S3.Region,
+		CLI.S3.AccessKeyID,
+		CLI.S3.SecretAccessKey,
+		CLI.S3.Bucket,
+		!CLI.S3.DisableSSL,
+		CLI.S3.UsePathStyle,
+	)
+	if err != nil {
+		logger.Errorf("unexpected error: failed to create remote backend: %v", err)
+		os.Exit(1)
+	}
+
 	// Initialize combined backend
-	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend)
+	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend, remoteBackend)
 	if err != nil {
 		logger.Errorf("unexpected error: failed to create combined backend: %v", err)
 		os.Exit(1)

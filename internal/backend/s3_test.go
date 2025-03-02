@@ -4,25 +4,28 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
-	testUser        = "minioadmin"
-	testPassword    = "minioadmin"
-	testBucket      = "testbucket"
-	testRegion      = "us-east-1"
-	exampleActionID = "v3BOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s="
-	exampleOutputID = "t/+D8XWCl4fwI29I1bd78wcUkCQeI2DJrT5jggWZZMk="
+	testUser     = "minioadmin"
+	testPassword = "minioadmin"
+	testBucket   = "testbucket"
+	testRegion   = "us-east-1"
 )
 
 // Global variables to hold dockertest pool, resource, and endpoint.
@@ -97,7 +100,7 @@ func TestMain(m *testing.M) {
 
 // newS3Instance creates an S3 instance for testing.
 func newS3Instance(t *testing.T) *S3 {
-	s3Inst, err := NewS3(endpoint, testRegion, testUser, testPassword, testBucket, false)
+	s3Inst, err := NewS3(endpoint, testRegion, testUser, testPassword, testBucket, false, true)
 	if err != nil {
 		t.Fatalf("Failed to create S3 instance: %v", err)
 	}
@@ -110,40 +113,30 @@ func TestPutAndGet(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		actionID string
+		outputID string
 		data     []byte
-		meta     *MetaData
+		size     int64
+		isPutErr bool
+		isGetErr bool
 	}{
 		{
 			name: "normal data",
 			data: []byte("test put method"),
 			// base64エンコードされた値
-			actionID: "v3BOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s=",
-			meta: &MetaData{
-				OutputID: exampleOutputID,
-				Size:     15,
-				Timenano: time.Now().UnixNano(),
-			},
+			outputID: "v3BOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s=",
+			size:     15,
 		},
 		{
 			name:     "empty data",
 			data:     []byte{},
-			actionID: "eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=",
-			meta: &MetaData{
-				OutputID: exampleOutputID,
-				Size:     0,
-				Timenano: time.Now().UnixNano(),
-			},
+			outputID: "eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=",
+			size:     0,
 		},
 		{
 			name:     "large data",
 			data:     bytes.Repeat([]byte("a"), 1024*1024*10),
-			actionID: "sjZslZ6Zj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=",
-			meta: &MetaData{
-				OutputID: exampleOutputID,
-				Size:     1024 * 1024 * 10,
-				Timenano: time.Now().UnixNano(),
-			},
+			outputID: "sjZslZ6Zj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=",
+			size:     1024 * 1024 * 10,
 		},
 	}
 
@@ -152,32 +145,214 @@ func TestPutAndGet(t *testing.T) {
 			t.Parallel()
 
 			s3Inst := newS3Instance(t)
-			err := s3Inst.Put(t.Context(), tc.actionID, tc.meta, bytes.NewReader(tc.data))
+			err := s3Inst.Put(t.Context(), tc.outputID, tc.size, bytes.NewReader(tc.data))
 			if err != nil {
 				t.Fatalf("Put failed: %v", err)
 			}
 
-			// Verify the operation by using Get.
+			if tc.isPutErr {
+				if err == nil {
+					t.Fatal("Put should have failed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Put failed: %v", err)
+			}
+
+			// Verify the operation by using Get with new signature.
 			var buf bytes.Buffer
-			actualMeta, err := s3Inst.Get(t.Context(), tc.actionID, &buf)
+			err = s3Inst.Get(t.Context(), tc.outputID, &buf)
+
+			if tc.isGetErr {
+				if err == nil {
+					t.Fatal("Get should have failed")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Get failed: %v", err)
 			}
 
-			t.Logf("actualMeta: %+v, meta: %+v", actualMeta, tc.meta)
-			if diff := cmp.Diff(tc.meta.Size, actualMeta.Size); diff != "" {
-				t.Errorf("Size mismatch: %s", diff)
-			}
-			if diff := cmp.Diff(tc.meta.OutputID, actualMeta.OutputID); diff != "" {
-				t.Errorf("OutputID mismatch: %s", diff)
-			}
-
-			if diff := cmp.Diff(tc.meta.Timenano, actualMeta.Timenano); diff != "" {
-				t.Errorf("Timenano mismatch: %s", diff)
-			}
-
 			if diff := cmp.Diff(tc.data, buf.Bytes()); diff != "" {
 				t.Errorf("Data mismatch: %s", diff)
+			}
+		})
+	}
+}
+
+// Integration tests for MetaData and WriteMetaData
+
+func TestMetaData(t *testing.T) {
+	t.Parallel()
+
+	s3Inst := newS3Instance(t)
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T)
+		wantEntries map[string]*v1.IndexEntry
+		isErr       bool
+	}{
+		{
+			name: "No metadata object exists",
+			setup: func(t *testing.T) {
+				// Remove metadata object if it exists.
+				_ = s3Inst.client.RemoveObject(context.Background(), testBucket, "r-metadata", minio.RemoveObjectOptions{})
+			},
+			wantEntries: nil,
+		},
+		{
+			name: "Valid metadata object exists",
+			setup: func(t *testing.T) {
+				metaMap := map[string]*v1.IndexEntry{
+					"eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=": {
+						OutputId:   "v3BOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s=",
+						Size:       15,
+						Timenano:   time.Now().UnixNano(),
+						LastUsedAt: timestamppb.New(time.Now().Add(-time.Hour)),
+					},
+				}
+				data, err := proto.Marshal(&v1.IndexEntryMap{Entries: metaMap})
+				if err != nil {
+					t.Fatalf("proto.Marshal failed: %v", err)
+				}
+
+				_, err = s3Inst.client.PutObject(context.Background(), testBucket, s3MetadataObjectName, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+					ContentType: "application/octet-stream",
+				})
+				if err != nil {
+					t.Fatalf("Failed to put metadata object: %v", err)
+				}
+			},
+			wantEntries: map[string]*v1.IndexEntry{
+				"eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=": {
+					OutputId:   "v3BOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s=",
+					Size:       15,
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.New(time.Now().Add(-time.Hour)),
+				},
+			},
+		},
+		{
+			name: "Invalid metadata object",
+			setup: func(t *testing.T) {
+				_, err := s3Inst.client.PutObject(context.Background(), testBucket, s3MetadataObjectName, bytes.NewReader([]byte("invalid data")), 12, minio.PutObjectOptions{
+					ContentType: "application/octet-stream",
+				})
+				if err != nil {
+					t.Fatalf("Failed to put metadata object: %v", err)
+				}
+			},
+			isErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
+
+			entries, err := s3Inst.MetaData(context.Background())
+
+			if tc.isErr {
+				if err == nil {
+					t.Error("MetaData should have failed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("MetaData failed: %v", err)
+			}
+
+			if diff := cmp.Diff(tc.wantEntries, entries, cmpopts.IgnoreFields(v1.IndexEntry{}, "LastUsedAt", "Timenano"), cmpopts.IgnoreUnexported(v1.IndexEntry{})); diff != "" {
+				t.Errorf("MetaData entries mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestWriteMetaData(t *testing.T) {
+	t.Parallel()
+
+	s3Inst := newS3Instance(t)
+	tests := []struct {
+		name           string
+		metaMap        map[string]*v1.IndexEntry
+		isAlreadyExist bool
+		isErr          bool
+	}{
+		{
+			name: "Write valid metadata",
+			metaMap: map[string]*v1.IndexEntry{
+				"eqWF6jnj8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=": {
+					OutputId:   "v3BOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s=",
+					Size:       15,
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.New(time.Now().Add(-time.Hour)),
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.isAlreadyExist {
+				metaMap := map[string]*v1.IndexEntry{
+					"j8u+hl4RcMhv+53OR/32mkxg1mypRdiSXUzc=": {
+						OutputId:   "sBOdpBuNr7ZbZjRFilEKBebzLA0Tpmt7zl2E/Vk34s=",
+						Size:       1000,
+						Timenano:   time.Now().UnixNano(),
+						LastUsedAt: timestamppb.New(time.Now().Add(-time.Hour)),
+					},
+				}
+				data, err := proto.Marshal(&v1.IndexEntryMap{Entries: metaMap})
+				if err != nil {
+					t.Fatalf("proto.Marshal failed: %v", err)
+				}
+
+				_, err = s3Inst.client.PutObject(context.Background(), testBucket, s3MetadataObjectName, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+					ContentType: "application/octet-stream",
+				})
+				if err != nil {
+					t.Fatalf("Failed to put metadata object: %v", err)
+				}
+			} else {
+				// Remove metadata object if it exists.
+				_ = s3Inst.client.RemoveObject(context.Background(), testBucket, s3MetadataObjectName, minio.RemoveObjectOptions{})
+			}
+
+			err := s3Inst.WriteMetaData(context.Background(), tc.metaMap)
+			if err != nil {
+				t.Errorf("WriteMetaData returned error: %v", err)
+			}
+
+			if tc.isErr {
+				if err == nil {
+					t.Error("WriteMetaData should have failed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("WriteMetaData failed: %v", err)
+			}
+
+			// Verify the operation by using MetaData.
+			obj, err := s3Inst.client.GetObject(context.Background(), testBucket, s3MetadataObjectName, minio.GetObjectOptions{})
+			if err != nil {
+				t.Fatalf("Failed to get metadata object: %v", err)
+			}
+			defer obj.Close()
+
+			data, err := io.ReadAll(obj)
+			if err != nil {
+				t.Fatalf("Failed to read metadata object: %v", err)
+			}
+
+			indexEntryMap := v1.IndexEntryMap{}
+			if err := proto.Unmarshal(data, &indexEntryMap); err != nil {
+				t.Fatalf("Failed to unmarshal metadata: %v", err)
+			}
+
+			if diff := cmp.Diff(tc.metaMap, indexEntryMap.Entries, cmpopts.IgnoreUnexported(v1.IndexEntry{}, timestamppb.Timestamp{})); diff != "" {
+				t.Errorf("MetaData entries mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

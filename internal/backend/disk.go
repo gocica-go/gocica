@@ -108,14 +108,17 @@ func (d *Disk) Get(ctx context.Context, outputID string) (diskPath string, err e
 }
 
 var sf = &singleflight.Group{}
+var ErrSizeMismatch = errors.New("size mismatch")
 
-func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Reader) (diskPath string, err error) {
+func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Reader) (string, error) {
 	outputFilePath := d.objectFilePath(outputID)
 
-	_, err, _ = sf.Do(outputID, func() (interface{}, error) {
-		f, err := os.Create(outputFilePath)
+	var iN any
+	iN, err, _ := sf.Do(outputID, func() (v any, err error) {
+		var f *os.File
+		f, err = os.Create(outputFilePath)
 		if err != nil {
-			return nil, fmt.Errorf("create output file: %w", err)
+			return 0, fmt.Errorf("create output file: %w", err)
 		}
 		defer func() {
 			if closeErr := f.Close(); closeErr != nil {
@@ -123,17 +126,29 @@ func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Rea
 			}
 		}()
 
+		var n int64
 		if size != 0 {
-			_, err = io.Copy(f, body)
+			n, err = io.Copy(f, body)
 			if err != nil {
-				return nil, fmt.Errorf("write output file: %w", err)
+				return 0, fmt.Errorf("write output file: %w", err)
 			}
 		}
 
-		return nil, nil
+		return n, nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("do singleflight: %w", err)
+	}
+
+	n := iN.(int64)
+	if n != size {
+		err = fmt.Errorf("%w: expected=%d, actual=%d", ErrSizeMismatch, size, n)
+		removeErr := os.Remove(outputFilePath)
+		if removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove output file: %w", removeErr))
+		}
+
+		return "", err
 	}
 
 	d.objectMapLocker.Lock()
