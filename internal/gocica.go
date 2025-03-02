@@ -12,13 +12,13 @@ import (
 
 type Gocica struct {
 	logger    log.Logger
-	backend   *backend.ConbinedBackend
+	backend   backend.Backend
 	hitCount  uint64
 	missCount uint64
 	putCount  uint64
 }
 
-func NewGocica(logger log.Logger, backend *backend.ConbinedBackend) *Gocica {
+func NewGocica(logger log.Logger, backend backend.Backend) *Gocica {
 	return &Gocica{logger: logger, backend: backend}
 }
 

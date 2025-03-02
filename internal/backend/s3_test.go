@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/log"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/ory/dockertest/v3"
@@ -40,7 +40,8 @@ func TestMain(m *testing.M) {
 	var err error
 	pool, err = dockertest.NewPool("")
 	if err != nil {
-		log.Fatalf("Failed to connect to docker: %s", err)
+		log.DefaultLogger.Errorf("Failed to create Docker pool: %s", err)
+		os.Exit(1)
 	}
 
 	opts := &dockertest.RunOptions{
@@ -60,11 +61,12 @@ func TestMain(m *testing.M) {
 		}
 	})
 	if err != nil {
-		log.Fatalf("Failed to start MinIO container: %s", err)
+		log.DefaultLogger.Errorf("Failed to start MinIO container: %s", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if err := pool.Purge(resource); err != nil {
-			log.Printf("Failed to purge MinIO container: %s", err)
+			log.DefaultLogger.Errorf("Failed to purge MinIO container: %s", err)
 		}
 	}()
 
@@ -90,7 +92,7 @@ func TestMain(m *testing.M) {
 
 		return nil
 	}); err != nil {
-		log.Fatalf("Failed to connect to MinIO container: %s", err)
+		log.DefaultLogger.Errorf("Failed to connect to MinIO: %s", err)
 	}
 
 	code := m.Run()
@@ -100,7 +102,7 @@ func TestMain(m *testing.M) {
 
 // newS3Instance creates an S3 instance for testing.
 func newS3Instance(t *testing.T) *S3 {
-	s3Inst, err := NewS3(endpoint, testRegion, testUser, testPassword, testBucket, false, true)
+	s3Inst, err := NewS3(log.DefaultLogger, endpoint, testRegion, testUser, testPassword, testBucket, false, true)
 	if err != nil {
 		t.Fatalf("Failed to create S3 instance: %v", err)
 	}

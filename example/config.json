@@ -4,7 +4,7 @@
   "s3": {
     "region": "us-east-1",
     "bucket": "my-bucket",
-    "accessKeyId": "your-access-key",
+    "accessKey": "your-access-key",
     "secretAccessKey": "your-secret-key",
     "endpoint": "https://s3.amazonaws.com",
     "disableSSL": false,

@@ -1,16 +1,17 @@
-//go:build !amd64 && !arm64
+//go:build (!amd64 && !arm64) || go1.24
 
-// This file is used when building for non-AMD64 architectures, utilizing the go-json library for JSON operations
+// This file is used when building for architectures that sonic library does not support
+// It uses the standard encoding/json library for JSON encoding and decoding operations
 
 package json // Package json provides a unified interface for JSON encoding and decoding operations
 
 import (
 	"io"
 
-	"github.com/goccy/go-json"
+	"encoding/json"
 )
 
-const Library = "github.com/goccy/go-json"
+const Library = "encoding/json"
 
 // Decoder represents a JSON decoder that uses go-json library for non-AMD64 architectures
 type Decoder struct {

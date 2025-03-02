@@ -21,11 +21,13 @@ const (
 	metadataFilePath = "r-metadata"
 )
 
-var _ Backend = &Disk{}
+var _ LocalBackend = &Disk{}
 
 type Disk struct {
-	logger          log.Logger
-	rootPath        string
+	logger   log.Logger
+	rootPath string
+
+	sf              singleflight.Group
 	objectMapLocker sync.RWMutex
 	objectMap       map[string]struct{}
 }
@@ -107,18 +109,33 @@ func (d *Disk) Get(ctx context.Context, outputID string) (diskPath string, err e
 	return d.objectFilePath(outputID), nil
 }
 
-var sf = &singleflight.Group{}
 var ErrSizeMismatch = errors.New("size mismatch")
 
 func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Reader) (string, error) {
+	defer func() {
+		_, err := io.Copy(io.Discard, body)
+		if err != nil {
+			d.logger.Errorf("discard body: %v", err)
+		}
+	}()
 	outputFilePath := d.objectFilePath(outputID)
 
 	var iN any
-	iN, err, _ := sf.Do(outputID, func() (v any, err error) {
+	iN, err, _ := d.sf.Do(outputID, func() (v any, err error) {
+		var ok bool
+		func() {
+			d.objectMapLocker.RLock()
+			defer d.objectMapLocker.RUnlock()
+			_, ok = d.objectMap[outputID]
+		}()
+		if ok {
+			return nil, nil
+		}
+
 		var f *os.File
 		f, err = os.Create(outputFilePath)
 		if err != nil {
-			return 0, fmt.Errorf("create output file: %w", err)
+			return nil, fmt.Errorf("create output file: %w", err)
 		}
 		defer func() {
 			if closeErr := f.Close(); closeErr != nil {
@@ -130,14 +147,22 @@ func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Rea
 		if size != 0 {
 			n, err = io.Copy(f, body)
 			if err != nil {
-				return 0, fmt.Errorf("write output file: %w", err)
+				return nil, fmt.Errorf("write output file: %w", err)
 			}
 		}
+
+		d.objectMapLocker.Lock()
+		defer d.objectMapLocker.Unlock()
+		d.objectMap[outputID] = struct{}{}
 
 		return n, nil
 	})
 	if err != nil {
 		return "", fmt.Errorf("do singleflight: %w", err)
+	}
+
+	if iN == nil {
+		return outputFilePath, nil
 	}
 
 	n := iN.(int64)
@@ -150,10 +175,6 @@ func (d *Disk) Put(ctx context.Context, outputID string, size int64, body io.Rea
 
 		return "", err
 	}
-
-	d.objectMapLocker.Lock()
-	defer d.objectMapLocker.Unlock()
-	d.objectMap[outputID] = struct{}{}
 
 	return outputFilePath, nil
 }
