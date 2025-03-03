@@ -12,6 +12,7 @@ type Level uint8
 const (
 	Silent Level = iota
 	Error
+	Warn
 	Info
 	Debug
 )
@@ -37,6 +38,14 @@ func (l *Logger) Errorf(format string, args ...any) {
 		return
 	}
 	l.logger.Printf("[ERROR] "+format, args...)
+}
+
+// Warnf logs a message at WARN level using printf style formatting
+func (l *Logger) Warnf(format string, args ...any) {
+	if l.level < Warn {
+		return
+	}
+	l.logger.Printf("[WARN] "+format, args...)
 }
 
 // Infof logs a message at INFO level using printf style formatting

@@ -109,7 +109,7 @@ func (d *Disk) Put(_ context.Context, outputID string, size int64, body io.Reade
 	defer func() {
 		_, err := io.Copy(io.Discard, body)
 		if err != nil {
-			d.logger.Errorf("discard body: %v", err)
+			d.logger.Warnf("discard body: %v", err)
 		}
 	}()
 	outputFilePath := d.objectFilePath(outputID)

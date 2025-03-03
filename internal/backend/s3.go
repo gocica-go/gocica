@@ -142,7 +142,7 @@ func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.Reader) 
 	defer func() {
 		_, err := io.Copy(io.Discard, r)
 		if err != nil {
-			s.logger.Errorf("discard body: %v", err)
+			s.logger.Warnf("discard body: %v", err)
 		}
 	}()
 

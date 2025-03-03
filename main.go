@@ -25,7 +25,7 @@ var CLI struct {
 	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
 	Config   kong.ConfigFlag  `kong:"chort='c',help='Load configuration from a file.'"`
 	Dir      string           `kong:"short='d',optional,help='Directory to store cache files',env='GOCICA_DIR'"`
-	LogLevel string           `kong:"short='l',default='info',enum='debug,info,error,silent',help='Log level',env='GOCICA_LOG_LEVEL'"`
+	LogLevel string           `kong:"short='l',default='info',enum='debug,info,warn,error,silent',help='Log level',env='GOCICA_LOG_LEVEL'"`
 	Remote   string           `kong:"short='r',default='none',enum='none,s3,github',help='Remote backend',env='GOCICA_REMOTE'"`
 	S3       struct {
 		Region          string `kong:"help='AWS region',env='GOCICA_S3_REGION'"`
@@ -50,14 +50,14 @@ func loadConfig(logger log.Logger) (*kong.Context, error) {
 	if err == nil {
 		configPaths = append(configPaths, filepath.Join(wd, ".gocica.json"))
 	} else {
-		logger.Infof("failed to get working directory. ignoring config file in working directory")
+		logger.Warnf("failed to get working directory. ignoring config file in working directory")
 	}
 
 	userHomeDir, err := os.UserHomeDir()
 	if err == nil {
 		configPaths = append(configPaths, filepath.Join(userHomeDir, ".gocica.json"))
 	} else {
-		logger.Infof("failed to get user home directory. ignoring config file in user home directory")
+		logger.Warnf("failed to get user home directory. ignoring config file in user home directory")
 	}
 
 	// Parse command line arguments and config files
@@ -105,7 +105,7 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 	case "s3":
 		// If S3 bucket is not specified, use disk backend only
 		if CLI.S3.Bucket == "" {
-			logger.Infof("S3 bucket is not specified. use disk backend only")
+			logger.Warnf("S3 bucket is not specified. use disk backend only")
 			return backend.NewNoRemoteBackend(logger, diskBackend)
 		}
 
@@ -126,7 +126,7 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 	case "github":
 		// If GitHub token is not specified, use disk backend only
 		if CLI.Github.Token == "" {
-			logger.Infof("GitHub token is not specified. use disk backend only")
+			logger.Warnf("GitHub token is not specified. use disk backend only")
 			return backend.NewNoRemoteBackend(logger, diskBackend)
 		}
 
@@ -154,7 +154,7 @@ func main() {
 	}
 
 	if err := CLI.Dev.StartProfiling(); err != nil {
-		logger.Errorf("failed to start profiling: %v", err)
+		logger.Warnf("failed to start profiling: %v", err)
 	}
 	defer CLI.Dev.StopProfiling()
 
@@ -164,11 +164,13 @@ func main() {
 		logger = mylog.NewLogger(mylog.Silent)
 	case "error":
 		logger = mylog.NewLogger(mylog.Error)
+	case "warn":
+		logger = mylog.NewLogger(mylog.Warn)
 	case "info":
 	case "debug":
 		logger = mylog.NewLogger(mylog.Debug)
 	default:
-		logger.Infof("invalid log level: %s. ignore log level setting.", CLI.LogLevel)
+		logger.Warnf("invalid log level: %s. ignore and use default log level", CLI.LogLevel)
 	}
 
 	logger.Debugf("configuration: %+v", CLI)
@@ -177,7 +179,7 @@ func main() {
 	backend, err := createBackend(logger)
 	if err != nil {
 		logger.Errorf("unexpected error: failed to create combined backend: %v", err)
-		panic(fmt.Errorf("failed to create combined backend: %w", err))
+		panic(fmt.Errorf("unexpected error: failed to create combined backend: %w", err))
 	}
 
 	// Create application instance
@@ -193,6 +195,6 @@ func main() {
 
 	if err := process.Run(); err != nil {
 		logger.Errorf("unexpected error: failed to run process: %v", err)
-		panic(fmt.Errorf("failed to run process: %w", err))
+		panic(fmt.Errorf("unexpected error: failed to run process: %w", err))
 	}
 }

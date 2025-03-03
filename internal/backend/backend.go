@@ -80,12 +80,12 @@ func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBack
 func (b *ConbinedBackend) start() {
 	metaDataMap, err := b.local.MetaData(context.Background())
 	if err != nil {
-		b.logger.Errorf("parse local metadata: %v. ignore the all local cache.", err)
+		b.logger.Warnf("parse local metadata: %v. ignore the all local cache.", err)
 	}
 
 	remoteMetaDataMap, err := b.remote.MetaData(context.Background())
 	if err != nil {
-		b.logger.Errorf("parse remote metadata: %v. ignore the all remote cache.", err)
+		b.logger.Warnf("parse remote metadata: %v. ignore the all remote cache.", err)
 	}
 
 	b.metaDataMap = metaDataMap

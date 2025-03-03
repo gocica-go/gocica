@@ -119,7 +119,7 @@ func (p *Process) Run() error {
 	if p.debugStdinLeakFile != "" {
 		stdinLeakFile, err := os.Create(p.debugStdinLeakFile)
 		if err != nil {
-			p.logger.Errorf("failed to create stdin leak file: %v", err)
+			p.logger.Warnf("failed to create stdin leak file: %v", err)
 		}
 		defer stdinLeakFile.Close()
 
@@ -178,7 +178,7 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		res := Response{}
 		err := p.handle(ctx, req, &res)
 		if err != nil {
-			p.logger.Errorf("handle request(%+v): %v", req, err)
+			p.logger.Warnf("handle request(%+v): %v", req, err)
 			res.Err = err.Error()
 		}
 		res.ID = req.ID
@@ -228,13 +228,13 @@ func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
 		p.logger.Debugf("sending response: %+v", resp)
 		err := encoder.Encode(resp)
 		if err != nil {
-			p.logger.Errorf("encode response(%+v): %v", resp, err)
+			p.logger.Warnf("encode response(%+v): %v", resp, err)
 			continue
 		}
 
 		err = bw.Flush()
 		if err != nil {
-			p.logger.Errorf("flush response(%+v): %v", resp, err)
+			p.logger.Warnf("flush response(%+v): %v", resp, err)
 			continue
 		}
 	}

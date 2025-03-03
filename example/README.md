@@ -34,7 +34,7 @@ You can also specify a configuration file using the `--config` flag.
 The following environment variables can be used to configure gocica:
 
 - `GOCICA_DIR`: Directory to store cache data
-- `GOCICA_LOG_LEVEL`: Log level (debug, info, error, none)
+- `GOCICA_LOG_LEVEL`: Log level (debug, info, warn, error, silent)
 - `GOCICA_REMOTE`: Remote backend (none, s3, GitHub)
 
 ### S3 Configuration
