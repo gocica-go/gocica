@@ -57,10 +57,11 @@ func NewGitHubActionsCache(
 }
 
 const (
-	actionsCacheBasePath       = "/twirp/github.actions.results.api.v1.CacheService/"
-	actionsCacheMetadataPrefix = "gocica-r-metadata"
-	actionCacheObjectPrefix    = "gocica-o"
-	actionsCacheSeparator      = "-"
+	actionsCacheBasePath        = "/twirp/github.actions.results.api.v1.CacheService/"
+	actionsCacheMetadataPrefix  = "gocica-r-metadata"
+	actionsCacheAllObjectPrefix = "gocica-o-all"
+	actionCacheObjectPrefix     = "gocica-o"
+	actionsCacheSeparator       = "-"
 )
 
 // actionsCacheVersion is sha256 of the context.
@@ -316,6 +317,10 @@ func (c *GitHubActionsCache) metadataBlobKey() (string, []string) {
 
 func (c *GitHubActionsCache) objectBlobKey(objectID string) (string, []string) {
 	return c.blobKey(actionCacheObjectPrefix + actionsCacheSeparator + objectID)
+}
+
+func (c *GitHubActionsCache) allObjectBlobKey() (string, []string) {
+	return c.blobKey(actionsCacheAllObjectPrefix)
 }
 
 func (c *GitHubActionsCache) blobKey(baseKey string) (string, []string) {
