@@ -54,7 +54,7 @@ jobs:
         run: chmod +x ${{ env.APP_NAME }}
       - run: go install std
         env:
-          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }}"
+          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} -l debug"
           GOCICA_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
