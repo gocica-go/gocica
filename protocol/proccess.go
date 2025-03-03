@@ -304,7 +304,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			}
 
 			// Wrap the request body reader with a limited reader to prevent reading more than expected
-			req.Body = buf
+			req.Body = myio.NewClonableReadSeeker(buf.Bytes())
 		}
 
 		eg.Go(func() error {

@@ -157,7 +157,7 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 	return res.Body, nil
 }
 
-func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.Reader) error {
+func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.ReadSeeker) error {
 	c.logger.Debugf("store cache: key=%s, size=%d", key, size)
 	var reserveRes struct {
 		OK              bool   `json:"ok"`
@@ -256,7 +256,7 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writ
 	return nil
 }
 
-func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.Reader) error {
+func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
 	key, _ := c.objectBlobKey(objectID)
 	err := c.storeCache(ctx, key, size, r)
 	if errors.Is(err, errAlreadyExists) {

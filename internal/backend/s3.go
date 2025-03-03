@@ -126,7 +126,7 @@ func (s *S3) Get(ctx context.Context, outputID string, w io.Writer) error {
 	return nil
 }
 
-func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.Reader) error {
+func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.ReadSeeker) error {
 	opts := minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
 	}

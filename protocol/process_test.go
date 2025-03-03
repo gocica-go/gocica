@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	myio "github.com/mazrean/gocica/internal/pkg/io"
 )
 
 func TestProcess_knownCommands(t *testing.T) {
@@ -307,7 +307,7 @@ func TestProcess_decodeWorker(t *testing.T) {
 			ActionID: "000a7673899170f3adcac947cabf348c041d32330bb3f6ac6f551128c0c7efa2",
 			OutputID: "04464d0c070ce0c1954c4d7846890a40597b70c10f9e7c542c30e6a2659abce4",
 		}
-		putBody     = strings.NewReader("gocica")
+		putBody     = myio.NewClonableReadSeeker([]byte("gocica"))
 		putReqValue = &Request{
 			ID:       2,
 			Command:  CmdPut,

@@ -20,7 +20,7 @@ import (
 
 type Backend interface {
 	Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error)
-	Put(ctx context.Context, actionID, outputID string, size int64, body io.Reader) (diskPath string, err error)
+	Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error)
 	Close() error
 }
 
@@ -36,7 +36,7 @@ type RemoteBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
 	WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error
 	Get(ctx context.Context, objectID string, w io.Writer) error
-	Put(ctx context.Context, objectID string, size int64, r io.Reader) error
+	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
 	Close() error
 }
 
@@ -199,7 +199,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 	}, nil
 }
 
-func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body io.Reader) (diskPath string, err error) {
+func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
 	indexEntry := &v1.IndexEntry{
 		OutputId:   outputID,
 		Size:       size,
@@ -214,24 +214,15 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	}()
 
 	var (
-		r io.Reader
+		localReader io.Reader
 	)
 	if size == 0 {
-		r = myio.EmptyReader
+		localReader = myio.EmptyReader
 	} else {
-		pr, pw := io.Pipe()
-		defer pw.Close()
-
-		r = io.TeeReader(body, pw)
+		localReader = body
+		remoteReader := body.Clone()
 
 		b.eg.Go(func() error {
-			defer func() {
-				_, err := io.Copy(io.Discard, pr)
-				if err != nil {
-					b.logger.Warnf("discard body: %v", err)
-				}
-			}()
-
 			_, err, _ := b.sf.Do(outputID, func() (any, error) {
 				var ok bool
 				func() {
@@ -243,7 +234,7 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 					return nil, nil
 				}
 
-				if err := b.remote.Put(context.Background(), outputID, size, pr); err != nil {
+				if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
 					return nil, fmt.Errorf("put remote cache: %w", err)
 				}
 
@@ -261,7 +252,7 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		})
 	}
 
-	diskPath, err = b.local.Put(ctx, outputID, size, r)
+	diskPath, err = b.local.Put(ctx, outputID, size, localReader)
 	if err != nil {
 		return "", fmt.Errorf("put: %w", err)
 	}
@@ -317,6 +308,8 @@ func (b *ConbinedBackend) Close() error {
 
 	return nil
 }
+
+var _ Backend = &NoRemoteBackend{}
 
 type NoRemoteBackend struct {
 	logger log.Logger
@@ -385,7 +378,7 @@ func (b *NoRemoteBackend) Get(ctx context.Context, actionID string) (diskPath st
 	}, nil
 }
 
-func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, size int64, body io.Reader) (diskPath string, err error) {
+func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
 	indexEntry := &v1.IndexEntry{
 		OutputId:   outputID,
 		Size:       size,
@@ -399,11 +392,14 @@ func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, si
 		b.newMetaDataMap[actionID] = indexEntry
 	}()
 
+	var r io.Reader
 	if size == 0 {
-		body = myio.EmptyReader
+		r = myio.EmptyReader
+	} else {
+		r = body
 	}
 
-	diskPath, err = b.local.Put(ctx, outputID, size, body)
+	diskPath, err = b.local.Put(ctx, outputID, size, r)
 	if err != nil {
 		return "", fmt.Errorf("put: %w", err)
 	}
