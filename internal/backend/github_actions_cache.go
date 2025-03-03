@@ -44,6 +44,8 @@ func NewGitHubActionsCache(
 		AccessToken: token,
 	}))
 
+	logger.Infof("GitHub Actions cache backend initialized.")
+
 	return &GitHubActionsCache{
 		logger:       logger,
 		githubClient: githubClient,
