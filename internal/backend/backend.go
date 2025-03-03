@@ -143,25 +143,33 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
-	pr, pw := io.Pipe()
-	eg.Go(func() error {
-		defer pw.Close()
+	var r io.Reader
+	if indexEntry.Size == 0 {
+		r = myio.EmptyReader
+	} else {
+		pr, pw := io.Pipe()
 
-		err := b.remote.Get(ctx, indexEntry.OutputId, pw)
-		if err != nil {
-			return fmt.Errorf("get remote cache: %w", err)
-		}
+		r = pr
 
-		func() {
-			b.objectMapLocker.Lock()
-			defer b.objectMapLocker.Unlock()
-			b.objectMap[indexEntry.OutputId] = struct{}{}
-		}()
+		eg.Go(func() error {
+			defer pw.Close()
 
-		return nil
-	})
+			err := b.remote.Get(ctx, indexEntry.OutputId, pw)
+			if err != nil {
+				return fmt.Errorf("get remote cache: %w", err)
+			}
 
-	diskPath, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size, pr)
+			func() {
+				b.objectMapLocker.Lock()
+				defer b.objectMapLocker.Unlock()
+				b.objectMap[indexEntry.OutputId] = struct{}{}
+			}()
+
+			return nil
+		})
+	}
+
+	diskPath, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size, r)
 	if err != nil {
 		if errors.Is(err, ErrSizeMismatch) {
 			return "", nil, nil
@@ -206,57 +214,54 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	}()
 
 	var (
-		remoteReader io.Reader
-		localReader  io.Reader
+		r io.Reader
 	)
 	if size == 0 {
-		remoteReader = myio.EmptyReader
-		localReader = myio.EmptyReader
+		r = myio.EmptyReader
 	} else {
 		pr, pw := io.Pipe()
 		defer pw.Close()
 
-		remoteReader = pr
-		localReader = io.TeeReader(body, pw)
+		r = io.TeeReader(body, pw)
+
+		b.eg.Go(func() error {
+			defer func() {
+				_, err := io.Copy(io.Discard, pr)
+				if err != nil {
+					b.logger.Warnf("discard body: %v", err)
+				}
+			}()
+
+			_, err, _ := b.sf.Do(outputID, func() (any, error) {
+				var ok bool
+				func() {
+					b.objectMapLocker.RLock()
+					defer b.objectMapLocker.RUnlock()
+					_, ok = b.objectMap[outputID]
+				}()
+				if ok {
+					return nil, nil
+				}
+
+				if err := b.remote.Put(context.Background(), outputID, size, pr); err != nil {
+					return nil, fmt.Errorf("put remote cache: %w", err)
+				}
+
+				b.objectMapLocker.Lock()
+				defer b.objectMapLocker.Unlock()
+				b.objectMap[outputID] = struct{}{}
+
+				return nil, nil
+			})
+			if err != nil {
+				return fmt.Errorf("do singleflight: %w", err)
+			}
+
+			return nil
+		})
 	}
 
-	b.eg.Go(func() error {
-		defer func() {
-			_, err := io.Copy(io.Discard, remoteReader)
-			if err != nil {
-				b.logger.Warnf("discard body: %v", err)
-			}
-		}()
-
-		_, err, _ := b.sf.Do(outputID, func() (any, error) {
-			var ok bool
-			func() {
-				b.objectMapLocker.RLock()
-				defer b.objectMapLocker.RUnlock()
-				_, ok = b.objectMap[outputID]
-			}()
-			if ok {
-				return nil, nil
-			}
-
-			if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
-				return nil, fmt.Errorf("put remote cache: %w", err)
-			}
-
-			b.objectMapLocker.Lock()
-			defer b.objectMapLocker.Unlock()
-			b.objectMap[outputID] = struct{}{}
-
-			return nil, nil
-		})
-		if err != nil {
-			return fmt.Errorf("do singleflight: %w", err)
-		}
-
-		return nil
-	})
-
-	diskPath, err = b.local.Put(ctx, outputID, size, localReader)
+	diskPath, err = b.local.Put(ctx, outputID, size, r)
 	if err != nil {
 		return "", fmt.Errorf("put: %w", err)
 	}
