@@ -41,7 +41,7 @@ The following environment variables can be used to configure gocica:
 - `GOCICA_S3_REGION`: AWS region
 - `GOCICA_S3_BUCKET`: S3 bucket name
 - `GOCICA_S3_ACCESS_KEY`: AWS access key
-- `GOCIAC_S3_SECRET_ACCESS_KEY`: AWS secret access key
+- `GOCICA_S3_SECRET_ACCESS_KEY`: AWS secret access key
 - `GOCICA_S3_ENDPOINT`: S3 endpoint
 - `GOCICA_S3_DISABLE_SSL`: Disable SSL for S3 connection
 - `GOCICA_S3_USE_PATH_STYLE`: Use path style for S3 connection
