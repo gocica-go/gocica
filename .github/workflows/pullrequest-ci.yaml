@@ -55,6 +55,7 @@ jobs:
       - run: go install std
         env:
           GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }}"
+          GOCICA_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
           GOCICA_S3_ACCESS_KEY_ID: ${{ secrets.GOCICA_S3_ACCESS_KEY_ID }}
