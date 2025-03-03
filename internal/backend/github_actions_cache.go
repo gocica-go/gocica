@@ -232,9 +232,17 @@ func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.Index
 	return indexEntryMap.Entries, nil
 }
 
-func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
+func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
+	indexEntryMap := &v1.IndexEntryMap{
+		Entries: metaDataMap,
+	}
+	buf, err := proto.Marshal(indexEntryMap)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
 	key, _ := c.metadataBlobKey()
-	return c.storeCache(ctx, key, int64(len(metaDataMapBuf)), bytes.NewReader(metaDataMapBuf))
+	return c.storeCache(ctx, key, int64(len(buf)), bytes.NewReader(buf))
 }
 
 func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writer) error {

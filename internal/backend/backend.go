@@ -14,7 +14,6 @@ import (
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -26,7 +25,7 @@ type Backend interface {
 
 type LocalBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
-	WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error
+	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
 	Get(ctx context.Context, outputID string) (diskPath string, err error)
 	Put(ctx context.Context, outputID string, size int64, body io.Reader) (diskPath string, err error)
 	Close() error
@@ -34,7 +33,7 @@ type LocalBackend interface {
 
 type RemoteBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
-	WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error
+	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
 	Get(ctx context.Context, objectID string, w io.Writer) error
 	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
 	Close() error
@@ -265,25 +264,8 @@ func (b *ConbinedBackend) Close() error {
 		return fmt.Errorf("wait for all tasks: %w", err)
 	}
 
-	var (
-		buf []byte
-		err error
-	)
-	func() {
-		b.newMetaDataMapLocker.Lock()
-		defer b.newMetaDataMapLocker.Unlock()
-
-		indexEntryMap := &v1.IndexEntryMap{
-			Entries: b.newMetaDataMap,
-		}
-		buf, err = proto.Marshal(indexEntryMap)
-	}()
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
 	b.eg.Go(func() error {
-		if err := b.remote.WriteMetaData(context.Background(), buf); err != nil {
+		if err := b.remote.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
 			return fmt.Errorf("write remote metadata: %w", err)
 		}
 
@@ -294,7 +276,7 @@ func (b *ConbinedBackend) Close() error {
 		return nil
 	})
 
-	if err := b.local.WriteMetaData(context.Background(), buf); err != nil {
+	if err := b.local.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
@@ -408,15 +390,7 @@ func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, si
 }
 
 func (b *NoRemoteBackend) Close() error {
-	indexEntryMap := &v1.IndexEntryMap{
-		Entries: b.newMetaDataMap,
-	}
-	buf, err := proto.Marshal(indexEntryMap)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	if err := b.local.WriteMetaData(context.Background(), buf); err != nil {
+	if err := b.local.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
