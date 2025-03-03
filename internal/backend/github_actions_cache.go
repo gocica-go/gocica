@@ -94,6 +94,8 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 }
 
 func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreKeys []string) (io.ReadCloser, error) {
+	c.logger.Debugf("load cache: key=%s, restoreKeys=%v", key, restoreKeys)
+
 	var loadResp struct {
 		OK                bool   `json:"ok"`
 		SignedDownloadURL string `json:"signed_download_url"`
@@ -112,6 +114,8 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 		return nil, errors.New("cache not found")
 	}
 
+	c.logger.Debugf("signed download url: %s", loadResp.SignedDownloadURL)
+
 	client, err := blockblob.NewClientWithNoCredential(loadResp.SignedDownloadURL, azureClientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("create client: %w", err)
@@ -122,10 +126,13 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 		return nil, fmt.Errorf("download stream: %w", err)
 	}
 
+	c.logger.Debugf("download done")
+
 	return res.Body, nil
 }
 
 func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.Reader) error {
+	c.logger.Debugf("store cache: key=%s, size=%d", key, size)
 	var reserveResp struct {
 		OK              bool   `json:"ok"`
 		SignedUploadURL string `json:"signed_upload_url"`
@@ -141,6 +148,7 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 	if !reserveResp.OK {
 		return errors.New("failed to reserve cache")
 	}
+	c.logger.Debugf("signed upload url: %s", reserveResp.SignedUploadURL)
 
 	client, err := blockblob.NewClientWithNoCredential(reserveResp.SignedUploadURL, azureClientOptions)
 	if err != nil {
@@ -150,6 +158,8 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 	if _, err := client.UploadStream(ctx, r, nil); err != nil {
 		return fmt.Errorf("upload stream: %w", err)
 	}
+
+	c.logger.Debugf("upload done")
 
 	var commitResp struct {
 		OK      bool   `json:"ok"`
@@ -166,6 +176,8 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 	if !commitResp.OK {
 		return errors.New("failed to commit cache")
 	}
+
+	c.logger.Debugf("commit done")
 
 	return nil
 }
