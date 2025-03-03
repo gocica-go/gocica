@@ -176,7 +176,7 @@ func main() {
 	case "debug":
 		logger = mylog.NewLogger(mylog.Debug)
 	default:
-		logger.Warnf("invalid log level: %s. ignore and use default log level", CLI.LogLevel)
+		logger.Warnf("invalid log level: %s. ignore and use default info level instead", CLI.LogLevel)
 	}
 
 	logger.Debugf("configuration: %+v", CLI)

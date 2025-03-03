@@ -241,7 +241,8 @@ func (c *GitHubActionsCache) blobKey(baseKey string) (string, []string) {
 	baseKey += actionsCacheSeparator + c.runnerOS
 	restoreKeys := make([]string, 0, 2)
 	for _, k := range []string{c.ref, c.sha} {
-		restoreKeys = append(restoreKeys, baseKey+actionsCacheSeparator)
+		baseKey += actionsCacheSeparator
+		restoreKeys = append(restoreKeys, baseKey)
 		baseKey += k
 	}
 
