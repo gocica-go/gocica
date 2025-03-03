@@ -20,7 +20,7 @@ import (
 type Backend interface {
 	Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error)
 	Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error)
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type LocalBackend interface {
@@ -28,7 +28,7 @@ type LocalBackend interface {
 	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
 	Get(ctx context.Context, outputID string) (diskPath string, err error)
 	Put(ctx context.Context, outputID string, size int64, body io.Reader) (diskPath string, err error)
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type RemoteBackend interface {
@@ -36,7 +36,7 @@ type RemoteBackend interface {
 	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
 	Get(ctx context.Context, objectID string, w io.Writer) error
 	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type MetaData struct {
@@ -259,7 +259,7 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	return diskPath, nil
 }
 
-func (b *ConbinedBackend) Close() error {
+func (b *ConbinedBackend) Close(ctx context.Context) error {
 	if err := b.eg.Wait(); err != nil {
 		return fmt.Errorf("wait for all tasks: %w", err)
 	}
@@ -269,7 +269,7 @@ func (b *ConbinedBackend) Close() error {
 			return fmt.Errorf("write remote metadata: %w", err)
 		}
 
-		if err := b.remote.Close(); err != nil {
+		if err := b.remote.Close(ctx); err != nil {
 			return fmt.Errorf("close remote backend: %w", err)
 		}
 
@@ -280,7 +280,7 @@ func (b *ConbinedBackend) Close() error {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
-	if err := b.local.Close(); err != nil {
+	if err := b.local.Close(ctx); err != nil {
 		return fmt.Errorf("close backend: %w", err)
 	}
 
@@ -389,12 +389,12 @@ func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, si
 	return diskPath, nil
 }
 
-func (b *NoRemoteBackend) Close() error {
+func (b *NoRemoteBackend) Close(ctx context.Context) error {
 	if err := b.local.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
 		return fmt.Errorf("write metadata: %w", err)
 	}
 
-	if err := b.local.Close(); err != nil {
+	if err := b.local.Close(ctx); err != nil {
 		return fmt.Errorf("close backend: %w", err)
 	}
 

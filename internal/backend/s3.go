@@ -150,6 +150,6 @@ func (s *S3) objectName(outputID string) string {
 	return fmt.Sprintf("o-%s", encodeID(outputID))
 }
 
-func (s *S3) Close() error {
+func (s *S3) Close(context.Context) error {
 	return nil
 }

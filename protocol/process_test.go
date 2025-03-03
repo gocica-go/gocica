@@ -48,7 +48,7 @@ func TestProcess_knownCommands(t *testing.T) {
 		{
 			name: "close handler only",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -63,7 +63,7 @@ func TestProcess_knownCommands(t *testing.T) {
 				WithPutHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -142,7 +142,7 @@ func TestProcess_handle(t *testing.T) {
 		{
 			name: "successful close handler",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -169,7 +169,7 @@ func TestProcess_handle(t *testing.T) {
 					return nil
 				}))
 			case "close":
-				options = append(options, WithCloseHandler(func() error {
+				options = append(options, WithCloseHandler(func(context.Context) error {
 					called = "close"
 					return nil
 				}))
@@ -214,7 +214,7 @@ func TestProcess_close(t *testing.T) {
 		{
 			name: "with close handler",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -224,7 +224,7 @@ func TestProcess_close(t *testing.T) {
 		{
 			name: "with error in close handler",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return fmt.Errorf("close error")
 				}),
 			},
@@ -238,7 +238,7 @@ func TestProcess_close(t *testing.T) {
 			called := false
 			if tt.wantCall {
 				tt.options = []ProcessOption{
-					WithCloseHandler(func() error {
+					WithCloseHandler(func(context.Context) error {
 						called = true
 						if tt.wantErr {
 							return fmt.Errorf("close error")
@@ -249,7 +249,7 @@ func TestProcess_close(t *testing.T) {
 			}
 
 			p := NewProcess(tt.options...)
-			err := p.close()
+			err := p.close(t.Context())
 
 			if tt.wantErr {
 				if err == nil {

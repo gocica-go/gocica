@@ -23,7 +23,7 @@ import (
 type Process struct {
 	getHandler         func(context.Context, *Request, *Response) error
 	putHandler         func(context.Context, *Request, *Response) error
-	closeHandler       func() error
+	closeHandler       func(context.Context) error
 	logger             log.Logger
 	responseBufferSize int
 	debugStdinLeakFile string
@@ -33,7 +33,7 @@ type Process struct {
 type processOption struct {
 	getHandler         func(context.Context, *Request, *Response) error
 	putHandler         func(context.Context, *Request, *Response) error
-	closeHandler       func() error
+	closeHandler       func(context.Context) error
 	logger             log.Logger
 	responseBufferSize int
 	debugStdinLeakFile string
@@ -60,9 +60,16 @@ func WithPutHandler(handler func(context.Context, *Request, *Response) error) Pr
 
 // WithCloseHandler sets the handler for CLOSE commands
 // The handler is wrapped with sync.OnceValue to ensure it's only called once
-func WithCloseHandler(handler func() error) ProcessOption {
+func WithCloseHandler(handler func(context.Context) error) ProcessOption {
 	return func(o *processOption) {
-		o.closeHandler = sync.OnceValue(handler)
+		var once sync.Once
+		o.closeHandler = func(ctx context.Context) error {
+			var err error
+			once.Do(func() {
+				err = handler(ctx)
+			})
+			return err
+		}
 	}
 }
 
@@ -140,7 +147,7 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		close(resCh)
 
 		// Perform cleanup and collect any errors that occur
-		deferErr := p.close()
+		deferErr := p.close(ctx)
 		if deferErr != nil {
 			deferErr = fmt.Errorf("close process: %w", deferErr)
 			if err == nil {
@@ -328,7 +335,7 @@ func (p *Process) handle(ctx context.Context, req *Request, res *Response) error
 		}
 		return p.putHandler(ctx, req, res)
 	case CmdClose:
-		return p.close()
+		return p.close(ctx)
 	default:
 		return fmt.Errorf("unknown command: %s", req.Command)
 	}
@@ -336,10 +343,10 @@ func (p *Process) handle(ctx context.Context, req *Request, res *Response) error
 
 // close handles the cleanup when the Process is being shut down
 // It calls the closeHandler if one is set
-func (p *Process) close() error {
+func (p *Process) close(ctx context.Context) error {
 	if p.closeHandler == nil {
 		return nil
 	}
 
-	return p.closeHandler()
+	return p.closeHandler(ctx)
 }

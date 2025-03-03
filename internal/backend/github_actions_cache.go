@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
@@ -22,10 +23,13 @@ import (
 var _ RemoteBackend = &GitHubActionsCache{}
 
 type GitHubActionsCache struct {
-	logger             log.Logger
-	githubClient       *http.Client
-	baseURL            *url.URL
-	runnerOS, ref, sha string
+	logger                       log.Logger
+	githubClient                 *http.Client
+	baseURL                      *url.URL
+	blockIDsLocker               sync.RWMutex
+	blockIDs                     []string
+	downloadClient, uploadClient *blockblob.Client
+	runnerOS, ref, sha           string
 }
 
 func NewGitHubActionsCache(
@@ -44,16 +48,48 @@ func NewGitHubActionsCache(
 		AccessToken: token,
 	}))
 
-	logger.Infof("GitHub Actions cache backend initialized.")
-
-	return &GitHubActionsCache{
+	c := &GitHubActionsCache{
 		logger:       logger,
 		githubClient: githubClient,
 		baseURL:      baseURL,
 		runnerOS:     runnerOS,
 		ref:          ref,
 		sha:          sha,
-	}, nil
+	}
+
+	allObjectBlobKey, restoreKeys := c.allObjectBlobKey()
+
+	downloadURL, err := c.getDownloadURL(context.Background(), allObjectBlobKey, restoreKeys)
+	if err != nil {
+		if !errors.Is(err, errActionsCacheNotFound) {
+			return nil, fmt.Errorf("get download url: %w", err)
+		}
+		c.logger.Infof("cache not found, creating new cache entry")
+	}
+	if downloadURL != "" {
+		c.downloadClient, err = blockblob.NewClientWithNoCredential(downloadURL, azureClientOptions)
+		if err != nil {
+			return nil, fmt.Errorf("create download client: %w", err)
+		}
+	}
+
+	uploadURL, err := c.createCacheEntry(context.Background(), allObjectBlobKey)
+	if err != nil {
+		if !errors.Is(err, errAlreadyExists) {
+			return nil, fmt.Errorf("create cache entry: %w", err)
+		}
+		c.logger.Infof("cache already exists, skipping upload")
+	}
+	if uploadURL != "" {
+		c.uploadClient, err = blockblob.NewClientWithNoCredential(uploadURL, azureClientOptions)
+		if err != nil {
+			return nil, fmt.Errorf("create upload client: %w", err)
+		}
+	}
+
+	logger.Infof("GitHub Actions cache backend initialized.")
+
+	return c, nil
 }
 
 const (
@@ -339,6 +375,17 @@ func (c *GitHubActionsCache) blobKey(baseKey string) (string, []string) {
 	return baseKey, restoreKeys
 }
 
-func (c *GitHubActionsCache) Close() error {
+func (c *GitHubActionsCache) Close(ctx context.Context) error {
+	if c.uploadClient != nil {
+		c.blockIDsLocker.RLock()
+		defer c.blockIDsLocker.RUnlock()
+
+		if _, err := c.uploadClient.CommitBlockList(ctx, c.blockIDs, nil); err != nil {
+			return fmt.Errorf("commit block list: %w", err)
+		}
+
+		c.logger.Debugf("commit block list done")
+	}
+
 	return nil
 }
