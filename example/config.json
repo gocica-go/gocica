@@ -12,6 +12,7 @@
     "use_path_style": false
   },
   "github": {
+    "cache_url": "https://actions.example.com/cache",
     "token": "your-github-token",
     "runner_os": "Linux",
     "ref": "refs/heads/main",

@@ -24,6 +24,7 @@ You can also specify a configuration file using the `-c, --config` flag.
     "use_path_style": false    // Use path style for S3 connection
   },
   "github": {                 // GitHub configuration (required when remote=GitHub)
+    "cache_url": "xxx",       // GitHub Actions Cache URL
     "token": "xxx",           // GitHub token or Actions Runtime token
     "runner_os": "Linux",     // GitHub runner OS
     "ref": "refs/heads/main", // GitHub base ref or target branch
@@ -50,6 +51,7 @@ The following environment variables can be used to configure gocica:
 - `GOCICA_S3_USE_PATH_STYLE`: Use path style for S3 connection
 
 ### GitHub Configuration
+- `GOCICA_GITHUB_CACHE_URL, ACTIONS_RESULTS_URL`: GitHub Actions Cache URL
 - `GOCICA_GITHUB_TOKEN, ACTIONS_RUNTIME_TOKEN`: GitHub Actions runtime token
 - `GOCICA_GITHUB_RUNNER_OS, RUNNER_OS`: GitHub Actions runner OS
 - `GOCICA_GITHUB_REF, GITHUB_REF`: GitHub ref
@@ -69,6 +71,7 @@ The following environment variables can be used to configure gocica:
 - `--s3.endpoint`: S3 endpoint
 - `--s3.disable-ssl`: Disable SSL for S3 connection
 - `--s3.use-path-style`: Use path style for S3 connection
+- `--github.cache-url`: GitHub Actions Cache URL
 - `--github.token`: GitHub token
 - `--github.runner-os`: GitHub runner OS
 - `--github.ref`: GitHub ref
