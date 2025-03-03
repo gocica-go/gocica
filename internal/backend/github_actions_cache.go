@@ -142,29 +142,6 @@ func (c *GitHubActionsCache) getDownloadURL(ctx context.Context, key string, res
 	return res.SignedDownloadURL, nil
 }
 
-func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreKeys []string) (io.ReadCloser, error) {
-	c.logger.Debugf("load cache: key=%s, restoreKeys=%v", key, restoreKeys)
-
-	signedDownloadURL, err := c.getDownloadURL(ctx, key, restoreKeys)
-	if err != nil {
-		return nil, fmt.Errorf("get download url: %w", err)
-	}
-
-	client, err := blockblob.NewClientWithNoCredential(signedDownloadURL, azureClientOptions)
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	res, err := client.DownloadStream(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("download stream: %w", err)
-	}
-
-	c.logger.Debugf("download done: key=%s", key)
-
-	return res.Body, nil
-}
-
 func (c *GitHubActionsCache) createCacheEntry(ctx context.Context, key string) (string, error) {
 	c.logger.Debugf("create cache entry: key=%s", key)
 	var res struct {
@@ -214,24 +191,34 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 
 func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
 	key, restoreKeys := c.metadataBlobKey()
-	res, err := c.loadCache(ctx, key, restoreKeys)
+
+	signedDownloadURL, err := c.getDownloadURL(ctx, key, restoreKeys)
 	if err != nil {
 		if errors.Is(err, errActionsCacheNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("load cache: %w", err)
+		return nil, fmt.Errorf("get download url: %w", err)
 	}
-	defer res.Close()
 
-	metaDataBuf, err := io.ReadAll(res)
+	client, err := blockblob.NewClientWithNoCredential(signedDownloadURL, azureClientOptions)
 	if err != nil {
-		return nil, fmt.Errorf("read all: %w", err)
+		return nil, fmt.Errorf("create client: %w", err)
 	}
+
+	var buf []byte
+	_, err = client.DownloadBuffer(ctx, buf, nil)
+	if err != nil {
+		return nil, fmt.Errorf("download stream: %w", err)
+	}
+
+	c.logger.Debugf("download done: key=%s", key)
 
 	var indexEntryMap v1.IndexEntryMap
-	if err := proto.Unmarshal(metaDataBuf, &indexEntryMap); err != nil {
+	if err := proto.Unmarshal(buf, &indexEntryMap); err != nil {
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
+
+	c.logger.Debugf("unmarshal index entry map done: size=%d", len(indexEntryMap.Entries))
 
 	return indexEntryMap.Entries, nil
 }
@@ -272,16 +259,26 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 
 func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writer) error {
 	key, restoreKeys := c.objectBlobKey(objectID)
-	res, err := c.loadCache(ctx, key, restoreKeys)
-	if err != nil {
-		if errors.Is(err, errActionsCacheNotFound) {
-			return nil
-		}
-		return fmt.Errorf("load cache: %w", err)
-	}
-	defer res.Close()
 
-	_, err = io.Copy(w, res)
+	signedDownloadURL, err := c.getDownloadURL(ctx, key, restoreKeys)
+	if err != nil {
+		return fmt.Errorf("get download url: %w", err)
+	}
+
+	client, err := blockblob.NewClientWithNoCredential(signedDownloadURL, azureClientOptions)
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
+	}
+
+	res, err := client.DownloadStream(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("download stream: %w", err)
+	}
+	defer res.Body.Close()
+
+	c.logger.Debugf("download done: key=%s", key)
+
+	_, err = io.Copy(w, res.Body)
 	if err != nil {
 		return fmt.Errorf("copy: %w", err)
 	}
@@ -309,7 +306,7 @@ func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int6
 		return fmt.Errorf("upload stream: %w", err)
 	}
 
-	c.logger.Debugf("upload done")
+	c.logger.Debugf("upload done: key=%s", key)
 
 	if err := c.commitCacheEntry(ctx, key, size); err != nil {
 		return fmt.Errorf("commit cache entry: %w", err)
