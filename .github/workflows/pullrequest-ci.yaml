@@ -58,7 +58,7 @@ jobs:
       - name: Build standard library
         run: go install std
         env:
-          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} -l debug"
+          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }}"
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
           GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
