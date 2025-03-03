@@ -36,6 +36,7 @@ jobs:
           path: ./${{ env.APP_NAME }}
   std_lib_build:
     name: Build standard library
+    needs: [build]
     runs-on: ubuntu-latest
     strategy:
       matrix:
