@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -23,28 +24,38 @@ var _ RemoteBackend = &GitHubActionsCache{}
 type GitHubActionsCache struct {
 	logger             log.Logger
 	githubClient       *http.Client
+	baseURL            *url.URL
 	runnerOS, ref, sha string
 }
 
 func NewGitHubActionsCache(
 	logger log.Logger,
 	token string,
+	strBaseURL string,
 	runnerOS, ref, sha string,
-) *GitHubActionsCache {
+) (*GitHubActionsCache, error) {
+	baseURL, err := url.Parse(strBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse base url: %w", err)
+	}
+	baseURL = baseURL.JoinPath(actionsCacheBasePath)
+
 	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: token,
 	}))
+
 	return &GitHubActionsCache{
 		logger:       logger,
 		githubClient: githubClient,
+		baseURL:      baseURL,
 		runnerOS:     runnerOS,
 		ref:          ref,
 		sha:          sha,
-	}
+	}, nil
 }
 
 const (
-	actionsCacheBaseURL        = "https://api.github.com/twirp/github.actions.results.api.v1.CacheService/"
+	actionsCacheBasePath       = "/twirp/github.actions.results.api.v1.CacheService/"
 	actionsCacheMetadataPrefix = "gocica-r-metadata"
 	actionCacheObjectPrefix    = "gocica-o"
 	actionsCacheSeparator      = "-"
@@ -62,7 +73,7 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 		return fmt.Errorf("encode request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, actionsCacheBaseURL+endpoint, buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.JoinPath(endpoint).RequestURI(), buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

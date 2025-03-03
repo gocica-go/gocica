@@ -37,6 +37,7 @@ var CLI struct {
 		UsePathStyle    bool   `kong:"help='Use path style for S3 connection',env='GOCICA_S3_USE_PATH_STYLE'"`
 	} `kong:"optional,group='s3',embed,prefix='s3.'"`
 	Github struct {
+		CacheURL string `kong:"help='GitHub Actions Cache URL',env='GOCICA_GITHUB_CACHE_URL,ACTIONS_CACHE_URL'"`
 		Token    string `kong:"help='GitHub token',env='GOCICA_GITHUB_TOKEN,ACTIONS_RUNTIME_TOKEN'"`
 		RunnerOS string `kong:"help='GitHub runner OS',env='GOCICA_GITHUB_RUNNER_OS,RUNNER_OS'"`
 		Ref      string `kong:"help='GitHub base ref of the workflow or the target branch of the pull request',env='GOCICA_GITHUB_REF,GITHUB_REF'"`
@@ -124,7 +125,7 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 			CLI.S3.UsePathStyle,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create remote backend: %w", err)
+			return nil, fmt.Errorf("create S3 backend: %w", err)
 		}
 	case "github":
 		// If GitHub token is not specified, use disk backend only
@@ -134,7 +135,15 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 		}
 
 		// Initialize GitHub Actions Cache backend
-		remoteBackend = backend.NewGitHubActionsCache(logger, CLI.Github.Token, CLI.Github.RunnerOS, CLI.Github.Ref, CLI.Github.Sha)
+		remoteBackend, err = backend.NewGitHubActionsCache(
+			logger,
+			CLI.Github.Token,
+			CLI.Github.CacheURL,
+			CLI.Github.RunnerOS, CLI.Github.Ref, CLI.Github.Sha,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create GitHub Actions Cache backend: %w", err)
+		}
 	default:
 		logger.Warnf("invalid remote backend: %s. use disk backend only", CLI.Remote)
 		return backend.NewNoRemoteBackend(logger, diskBackend)
