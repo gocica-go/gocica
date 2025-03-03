@@ -61,6 +61,11 @@ const (
 	actionsCacheSeparator      = "-"
 )
 
+// actionsCacheVersion is sha256 of the context.
+// upstream uses paths in actionsCacheVersion, we don't seem to have anything that is unique like this.
+// so we use the sha256 of "gocica-cache-1.0" as a actionsCacheVersion.
+var actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053f746fae0287"
+
 var azureClientOptions = &blockblob.ClientOptions{
 	ClientOptions: azcore.ClientOptions{},
 }
@@ -116,7 +121,7 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 		Key         string   `json:"key"`
 		RestoreKeys []string `json:"restore_keys"`
 		Version     string   `json:"version"`
-	}{key, restoreKeys, "1"}, &loadResp)
+	}{key, restoreKeys, actionsCacheVersion}, &loadResp)
 	if err != nil {
 		return nil, fmt.Errorf("get cache entry download url: %w", err)
 	}
@@ -151,7 +156,7 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 	err := c.doRequest(ctx, "CreateCacheEntry", &struct {
 		Key     string `json:"key"`
 		Version string `json:"version"`
-	}{key, "1"}, &reserveRes)
+	}{key, actionsCacheVersion}, &reserveRes)
 	if err != nil {
 		return err
 	}
@@ -180,7 +185,7 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 		Key       string `json:"key"`
 		SizeBytes int64  `json:"size_bytes"`
 		Version   string `json:"version"`
-	}{key, size, "1"}, &commitRes); err != nil {
+	}{key, size, actionsCacheVersion}, &commitRes); err != nil {
 		return err
 	}
 
