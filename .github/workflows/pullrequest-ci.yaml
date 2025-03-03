@@ -58,7 +58,7 @@ jobs:
           GOCICA_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
-          GOCICA_S3_ACCESS_KEY_ID: ${{ secrets.GOCICA_S3_ACCESS_KEY_ID }}
+          GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
           GOCICA_S3_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
   test:
     name: Test
