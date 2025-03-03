@@ -53,6 +53,7 @@ jobs:
       - name: Fix permissions # ref: https://github.com/actions/download-artifact?tab=readme-ov-file#permission-loss
         run: chmod +x ${{ env.APP_NAME }}
       - name: Expose GitHub Actions runtime environment variables
+        if: matrix.remote == 'github'
         uses: crazy-max/ghaction-github-runtime@v3
       - name: Build standard library
         run: go install std

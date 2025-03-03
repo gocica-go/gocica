@@ -73,7 +73,7 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 		return fmt.Errorf("encode request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.JoinPath(endpoint).RequestURI(), buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.JoinPath(endpoint).String(), buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
