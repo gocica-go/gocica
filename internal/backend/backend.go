@@ -72,6 +72,7 @@ func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBack
 	conbined := &ConbinedBackend{
 		logger:       logger,
 		eg:           &errgroup.Group{},
+		objectMap:    map[string]struct{}{},
 		local:        local,
 		remote:       remote,
 		nowTimestamp: timestamppb.Now(),
