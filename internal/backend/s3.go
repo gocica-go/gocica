@@ -5,13 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync"
 
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -27,10 +25,6 @@ type S3 struct {
 	logger log.Logger
 	client *minio.Client
 	bucket string
-
-	sf              singleflight.Group
-	objectMapLocker sync.RWMutex
-	objectMap       map[string]struct{}
 }
 
 // NewS3 initializes a new S3 backend.
@@ -70,10 +64,9 @@ func NewS3(
 	logger.Infof("S3 backend initialized with bucket %q", bucket)
 
 	return &S3{
-		logger:    logger,
-		client:    client,
-		bucket:    bucket,
-		objectMap: make(map[string]struct{}),
+		logger: logger,
+		client: client,
+		bucket: bucket,
 	}, nil
 }
 
@@ -125,56 +118,21 @@ func (s *S3) Get(ctx context.Context, outputID string, w io.Writer) error {
 	}
 	defer obj.Close()
 
-	func() {
-		s.objectMapLocker.Lock()
-		defer s.objectMapLocker.Unlock()
-		s.objectMap[outputID] = struct{}{}
-	}()
-
 	_, err = io.Copy(w, obj)
 	if err != nil {
 		return fmt.Errorf("copy object: %w", err)
 	}
+
 	return nil
 }
 
 func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.Reader) error {
-	defer func() {
-		_, err := io.Copy(io.Discard, r)
-		if err != nil {
-			s.logger.Errorf("discard body: %v", err)
-		}
-	}()
-
-	_, err, _ := s.sf.Do(outputID, func() (any, error) {
-		var ok bool
-		func() {
-			s.objectMapLocker.RLock()
-			defer s.objectMapLocker.RUnlock()
-			_, ok = s.objectMap[outputID]
-		}()
-		if ok {
-			return nil, nil
-		}
-
-		opts := minio.PutObjectOptions{
-			ContentType: "application/octet-stream",
-		}
-		_, err := s.client.PutObject(ctx, s.bucket, s.objectName(outputID), r, size, opts)
-		if err != nil {
-			return nil, fmt.Errorf("upload object: %w", err)
-		}
-
-		func() {
-			s.objectMapLocker.Lock()
-			defer s.objectMapLocker.Unlock()
-			s.objectMap[outputID] = struct{}{}
-		}()
-
-		return nil, nil
-	})
+	opts := minio.PutObjectOptions{
+		ContentType: "application/octet-stream",
+	}
+	_, err := s.client.PutObject(ctx, s.bucket, s.objectName(outputID), r, size, opts)
 	if err != nil {
-		return fmt.Errorf("do singleflight: %w", err)
+		return fmt.Errorf("upload object: %w", err)
 	}
 
 	return nil
