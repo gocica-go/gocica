@@ -215,6 +215,9 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writ
 	key, restoreKeys := c.objectBlobKey(objectID)
 	res, err := c.loadCache(ctx, key, restoreKeys)
 	if err != nil {
+		if errors.Is(err, errActionsCacheNotFound) {
+			return nil
+		}
 		return fmt.Errorf("load cache: %w", err)
 	}
 	defer res.Close()
@@ -228,6 +231,13 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writ
 }
 
 func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.Reader) error {
+	defer func() {
+		_, err := io.Copy(io.Discard, r)
+		if err != nil {
+			c.logger.Warnf("discard body: %v", err)
+		}
+	}()
+
 	key, _ := c.objectBlobKey(objectID)
 	return c.storeCache(ctx, key, size, r)
 }
