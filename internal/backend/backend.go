@@ -13,6 +13,7 @@ import (
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -52,11 +53,15 @@ var _ Backend = &ConbinedBackend{}
 
 type ConbinedBackend struct {
 	logger log.Logger
-	eg     *errgroup.Group
 
 	local  LocalBackend
 	remote RemoteBackend
 
+	sf              singleflight.Group
+	objectMapLocker sync.RWMutex
+	objectMap       map[string]struct{}
+
+	eg                   *errgroup.Group
 	nowTimestamp         *timestamppb.Timestamp
 	metaDataMap          map[string]*v1.IndexEntry
 	newMetaDataMapLocker sync.Mutex
@@ -146,6 +151,12 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 			return fmt.Errorf("get remote cache: %w", err)
 		}
 
+		func() {
+			b.objectMapLocker.Lock()
+			defer b.objectMapLocker.Unlock()
+			b.objectMap[indexEntry.OutputId] = struct{}{}
+		}()
+
 		return nil
 	})
 
@@ -209,8 +220,36 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	}
 
 	b.eg.Go(func() error {
-		if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
-			return fmt.Errorf("put remote cache: %w", err)
+		defer func() {
+			_, err := io.Copy(io.Discard, remoteReader)
+			if err != nil {
+				b.logger.Warnf("discard body: %v", err)
+			}
+		}()
+
+		_, err, _ := b.sf.Do(outputID, func() (any, error) {
+			var ok bool
+			func() {
+				b.objectMapLocker.RLock()
+				defer b.objectMapLocker.RUnlock()
+				_, ok = b.objectMap[outputID]
+			}()
+			if ok {
+				return nil, nil
+			}
+
+			if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
+				return nil, fmt.Errorf("put remote cache: %w", err)
+			}
+
+			b.objectMapLocker.Lock()
+			defer b.objectMapLocker.Unlock()
+			b.objectMap[outputID] = struct{}{}
+
+			return nil, nil
+		})
+		if err != nil {
+			return fmt.Errorf("do singleflight: %w", err)
 		}
 
 		return nil
