@@ -93,11 +93,14 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode == http.StatusNotFound {
+	switch res.StatusCode {
+	case http.StatusNotFound:
 		return errActionsCacheNotFound
-	} else if res.StatusCode == http.StatusConflict {
+	case http.StatusConflict:
 		return errAlreadyExists
-	} else if res.StatusCode != http.StatusOK {
+	case http.StatusOK:
+		// continue to process response for successful request
+	default:
 		sb := &strings.Builder{}
 		_, err := io.Copy(sb, res.Body)
 		if err != nil {
