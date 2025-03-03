@@ -204,30 +204,6 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 	return nil
 }
 
-func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.ReadSeeker) error {
-	signedUploadURL, err := c.createCacheEntry(ctx, key)
-	if err != nil {
-		return fmt.Errorf("create cache entry: %w", err)
-	}
-
-	client, err := blockblob.NewClientWithNoCredential(signedUploadURL, azureClientOptions)
-	if err != nil {
-		return fmt.Errorf("create client: %w", err)
-	}
-
-	if _, err := client.UploadStream(ctx, r, nil); err != nil {
-		return fmt.Errorf("upload stream: %w", err)
-	}
-
-	c.logger.Debugf("upload done")
-
-	if err := c.commitCacheEntry(ctx, key, size); err != nil {
-		return fmt.Errorf("commit cache entry: %w", err)
-	}
-
-	return nil
-}
-
 func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
 	key, restoreKeys := c.metadataBlobKey()
 	res, err := c.loadCache(ctx, key, restoreKeys)
@@ -262,7 +238,28 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 	}
 
 	key, _ := c.metadataBlobKey()
-	return c.storeCache(ctx, key, int64(len(buf)), bytes.NewReader(buf))
+
+	signedUploadURL, err := c.createCacheEntry(ctx, key)
+	if err != nil {
+		return fmt.Errorf("create cache entry: %w", err)
+	}
+
+	client, err := blockblob.NewClientWithNoCredential(signedUploadURL, azureClientOptions)
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
+	}
+
+	if _, err := client.UploadBuffer(ctx, buf, nil); err != nil {
+		return fmt.Errorf("upload stream: %w", err)
+	}
+
+	c.logger.Debugf("upload done")
+
+	if err := c.commitCacheEntry(ctx, key, int64(len(buf))); err != nil {
+		return fmt.Errorf("commit cache entry: %w", err)
+	}
+
+	return nil
 }
 
 func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writer) error {
@@ -286,9 +283,28 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writ
 
 func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
 	key, _ := c.objectBlobKey(objectID)
-	err := c.storeCache(ctx, key, size, r)
-	if errors.Is(err, errAlreadyExists) {
-		return nil
+
+	signedUploadURL, err := c.createCacheEntry(ctx, key)
+	if err != nil {
+		if errors.Is(err, errAlreadyExists) {
+			return nil
+		}
+		return fmt.Errorf("create cache entry: %w", err)
+	}
+
+	client, err := blockblob.NewClientWithNoCredential(signedUploadURL, azureClientOptions)
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
+	}
+
+	if _, err := client.UploadStream(ctx, r, nil); err != nil {
+		return fmt.Errorf("upload stream: %w", err)
+	}
+
+	c.logger.Debugf("upload done")
+
+	if err := c.commitCacheEntry(ctx, key, size); err != nil {
+		return fmt.Errorf("commit cache entry: %w", err)
 	}
 
 	return err
