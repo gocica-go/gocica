@@ -1,5 +1,5 @@
 // Package log provides a simple wrapper around the standard log package
-// with support for different log levels (ERROR, INFO, DEBUG)
+// with support for different log levels (ERROR, WARN, INFO, DEBUG)
 package log
 
 import (

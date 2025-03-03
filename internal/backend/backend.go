@@ -298,7 +298,7 @@ func NewNoRemoteBackend(logger log.Logger, local LocalBackend) (*NoRemoteBackend
 func (b *NoRemoteBackend) start() {
 	metaDataMap, err := b.local.MetaData(context.Background())
 	if err != nil {
-		b.logger.Errorf("parse local metadata: %v. ignore the all local cache.", err)
+		b.logger.Warnf("parse local metadata: %v. ignore the all local cache.", err)
 	}
 
 	b.metaDataMap = metaDataMap
