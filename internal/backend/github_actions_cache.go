@@ -22,13 +22,15 @@ import (
 var _ RemoteBackend = &GitHubActionsCache{}
 
 type GitHubActionsCache struct {
-	logger       log.Logger
-	githubClient *http.Client
+	logger             log.Logger
+	githubClient       *http.Client
+	runnerOS, ref, sha string
 }
 
 func NewGitHubActionsCache(
 	logger log.Logger,
 	token string,
+	runnerOS, ref, sha string,
 ) *GitHubActionsCache {
 	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: token,
@@ -38,12 +40,17 @@ func NewGitHubActionsCache(
 	return &GitHubActionsCache{
 		logger:       logger,
 		githubClient: githubClient,
+		runnerOS:     runnerOS,
+		ref:          ref,
+		sha:          sha,
 	}
 }
 
 const (
-	githubActionsCacheBaseURL    = "https://api.github.com/twirp/github.actions.results.api.v1.CacheService/"
-	githubActionsCacheMetadatKey = "gocica/r-metadata"
+	actionsCacheBaseURL        = "https://api.github.com/twirp/github.actions.results.api.v1.CacheService/"
+	actionsCacheMetadataPrefix = "gocica-r-metadata"
+	actionCacheObjectPrefix    = "gocica-o"
+	actionsCacheSeparator      = "-"
 )
 
 var azureClientOptions = &blockblob.ClientOptions{
@@ -57,7 +64,7 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 		return fmt.Errorf("encode request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubActionsCacheBaseURL+endpoint, buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, actionsCacheBaseURL+endpoint, buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -86,17 +93,18 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	return nil
 }
 
-func (c *GitHubActionsCache) loadCache(ctx context.Context, key string) (io.ReadCloser, error) {
+func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreKeys []string) (io.ReadCloser, error) {
 	var loadResp struct {
 		OK                bool   `json:"ok"`
 		SignedDownloadURL string `json:"signed_download_url"`
 		MatchedKey        string `json:"matched_key"`
 	}
-	if err := c.doRequest(ctx, "GetCacheEntryDownloadURL", &struct {
+	err := c.doRequest(ctx, "GetCacheEntryDownloadURL", &struct {
 		Key         string   `json:"key"`
 		RestoreKeys []string `json:"restore_keys"`
 		Version     string   `json:"version"`
-	}{key, nil, "1"}, &loadResp); err != nil {
+	}{key, restoreKeys, "1"}, &loadResp)
+	if err != nil {
 		return nil, err
 	}
 
@@ -122,10 +130,11 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 		OK              bool   `json:"ok"`
 		SignedUploadURL string `json:"signed_upload_url"`
 	}
-	if err := c.doRequest(ctx, "CreateCacheEntry", &struct {
+	err := c.doRequest(ctx, "CreateCacheEntry", &struct {
 		Key     string `json:"key"`
 		Version string `json:"version"`
-	}{key, "1"}, &reserveResp); err != nil {
+	}{key, "1"}, &reserveResp)
+	if err != nil {
 		return err
 	}
 
@@ -162,7 +171,8 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 }
 
 func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
-	res, err := c.loadCache(ctx, githubActionsCacheMetadatKey)
+	key, restoreKeys := c.metadataBlobKey()
+	res, err := c.loadCache(ctx, key, restoreKeys)
 	if err != nil {
 		return nil, fmt.Errorf("load cache: %w", err)
 	}
@@ -182,11 +192,13 @@ func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.Index
 }
 
 func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
-	return c.storeCache(ctx, githubActionsCacheMetadatKey, int64(len(metaDataMapBuf)), bytes.NewReader(metaDataMapBuf))
+	key, _ := c.metadataBlobKey()
+	return c.storeCache(ctx, key, int64(len(metaDataMapBuf)), bytes.NewReader(metaDataMapBuf))
 }
 
 func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writer) error {
-	res, err := c.loadCache(ctx, c.objectBlobKey(objectID))
+	key, restoreKeys := c.objectBlobKey(objectID)
+	res, err := c.loadCache(ctx, key, restoreKeys)
 	if err != nil {
 		return fmt.Errorf("load cache: %w", err)
 	}
@@ -201,11 +213,27 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writ
 }
 
 func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.Reader) error {
-	return c.storeCache(ctx, c.objectBlobKey(objectID), size, r)
+	key, _ := c.objectBlobKey(objectID)
+	return c.storeCache(ctx, key, size, r)
 }
 
-func (c *GitHubActionsCache) objectBlobKey(objectID string) string {
-	return fmt.Sprintf("gocica/o-%s", encodeID(objectID))
+func (c *GitHubActionsCache) metadataBlobKey() (string, []string) {
+	return c.blobKey(actionsCacheMetadataPrefix)
+}
+
+func (c *GitHubActionsCache) objectBlobKey(objectID string) (string, []string) {
+	return c.blobKey(actionCacheObjectPrefix + actionsCacheSeparator + objectID)
+}
+
+func (c *GitHubActionsCache) blobKey(baseKey string) (string, []string) {
+	baseKey += actionsCacheSeparator + c.runnerOS
+	restoreKeys := make([]string, 0, 2)
+	for _, k := range []string{c.ref, c.sha} {
+		restoreKeys = append(restoreKeys, baseKey+actionsCacheSeparator)
+		baseKey += k
+	}
+
+	return baseKey, restoreKeys
 }
 
 func (c *GitHubActionsCache) Close() error {

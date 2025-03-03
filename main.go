@@ -37,7 +37,10 @@ var CLI struct {
 		UsePathStyle    bool   `kong:"help='Use path style for S3 connection',env='GOCICA_S3_USE_PATH_STYLE'"`
 	} `kong:"optional,group='s3',embed,prefix='s3.'"`
 	Github struct {
-		Token string `kong:"help='GitHub token',env='GOCICA_GITHUB_TOKEN,ACTIONS_RUNTIME_TOKEN'"`
+		Token    string `kong:"help='GitHub token',env='GOCICA_GITHUB_TOKEN,ACTIONS_RUNTIME_TOKEN'"`
+		RunnerOS string `kong:"help='GitHub runner OS',env='GOCICA_GITHUB_RUNNER_OS,RUNNER_OS'"`
+		Ref      string `kong:"help='GitHub base ref of the workflow or the target branch of the pull request',env='GOCICA_GITHUB_REF,GITHUB_REF'"`
+		Sha      string `kong:"help='GitHub SHA of the commit',env='GOCICA_GITHUB_SHA,GITHUB_SHA'"`
 	} `kong:"optional,group='github',embed,prefix='github.'"`
 	Dev DevFlag `kong:"group='dev',embed,prefix='dev.'"`
 }
@@ -131,7 +134,10 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 		}
 
 		// Initialize GitHub Actions Cache backend
-		remoteBackend = backend.NewGitHubActionsCache(logger, CLI.Github.Token)
+		remoteBackend = backend.NewGitHubActionsCache(logger, CLI.Github.Token, CLI.Github.RunnerOS, CLI.Github.Ref, CLI.Github.Sha)
+	default:
+		logger.Warnf("invalid remote backend: %s. use disk backend only", CLI.Remote)
+		return backend.NewNoRemoteBackend(logger, diskBackend)
 	}
 
 	// Initialize combined backend
