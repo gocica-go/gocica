@@ -120,10 +120,10 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	return nil
 }
 
-func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreKeys []string) (io.ReadCloser, error) {
-	c.logger.Debugf("load cache: key=%s, restoreKeys=%v", key, restoreKeys)
+func (c *GitHubActionsCache) getDownloadURL(ctx context.Context, key string, restoreKeys []string) (string, error) {
+	c.logger.Debugf("get download url: key=%s, restoreKeys=%v", key, restoreKeys)
 
-	var loadResp struct {
+	var res struct {
 		OK                bool   `json:"ok"`
 		SignedDownloadURL string `json:"signed_download_url"`
 		MatchedKey        string `json:"matched_key"`
@@ -132,18 +132,25 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 		Key         string   `json:"key"`
 		RestoreKeys []string `json:"restore_keys"`
 		Version     string   `json:"version"`
-	}{key, restoreKeys, actionsCacheVersion}, &loadResp)
+	}{key, restoreKeys, actionsCacheVersion}, &res)
 	if err != nil {
-		return nil, fmt.Errorf("get cache entry download url: %w", err)
+		return "", fmt.Errorf("get cache entry download url: %w", err)
 	}
 
-	if !loadResp.OK {
-		return nil, errors.New("cache not found")
+	c.logger.Debugf("signed download url: %s", res.SignedDownloadURL)
+
+	return res.SignedDownloadURL, nil
+}
+
+func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreKeys []string) (io.ReadCloser, error) {
+	c.logger.Debugf("load cache: key=%s, restoreKeys=%v", key, restoreKeys)
+
+	signedDownloadURL, err := c.getDownloadURL(ctx, key, restoreKeys)
+	if err != nil {
+		return nil, fmt.Errorf("get download url: %w", err)
 	}
 
-	c.logger.Debugf("signed download url: %s", loadResp.SignedDownloadURL)
-
-	client, err := blockblob.NewClientWithNoCredential(loadResp.SignedDownloadURL, azureClientOptions)
+	client, err := blockblob.NewClientWithNoCredential(signedDownloadURL, azureClientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("create client: %w", err)
 	}
