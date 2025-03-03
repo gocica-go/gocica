@@ -69,7 +69,10 @@ var actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053
 var azureClientOptions = &blockblob.ClientOptions{
 	ClientOptions: azcore.ClientOptions{},
 }
-var errActionsCacheNotFound = errors.New("cache not found")
+var (
+	errActionsCacheNotFound = errors.New("cache not found")
+	errAlreadyExists        = errors.New("cache already exists")
+)
 
 func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, reqBody any, respBody any) error {
 	buf := &bytes.Buffer{}
@@ -92,6 +95,8 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 
 	if res.StatusCode == http.StatusNotFound {
 		return errActionsCacheNotFound
+	} else if res.StatusCode == http.StatusConflict {
+		return errAlreadyExists
 	} else if res.StatusCode != http.StatusOK {
 		sb := &strings.Builder{}
 		_, err := io.Copy(sb, res.Body)
@@ -248,7 +253,12 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writ
 
 func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.Reader) error {
 	key, _ := c.objectBlobKey(objectID)
-	return c.storeCache(ctx, key, size, r)
+	err := c.storeCache(ctx, key, size, r)
+	if errors.Is(err, errAlreadyExists) {
+		return nil
+	}
+
+	return err
 }
 
 func (c *GitHubActionsCache) metadataBlobKey() (string, []string) {
