@@ -32,7 +32,7 @@ var CLI struct {
 		Bucket          string `kong:"help='S3 bucket name',env='GOCICA_S3_BUCKET'"`
 		AccessKey       string `kong:"help='AWS access key',env='GOCIAC_S3_ACCESS_KEY'"`
 		SecretAccessKey string `kong:"help='AWS secret access key',env='GOCIAC_S3_SECRET_ACCESS_KEY'"`
-		Endpoint        string `kong:"help='S3 endpoint',env='GOCICA_S3_ENDPOINT',default='https://s3.amazonaws.com'"`
+		Endpoint        string `kong:"help='S3 endpoint',env='GOCICA_S3_ENDPOINT',default='s3.amazonaws.com'"`
 		DisableSSL      bool   `kong:"help='Disable SSL for S3 connection',env='GOCICA_S3_DISABLE_SSL'"`
 		UsePathStyle    bool   `kong:"help='Use path style for S3 connection',env='GOCICA_S3_USE_PATH_STYLE'"`
 	} `kong:"optional,group='s3',embed,prefix='s3.'"`
