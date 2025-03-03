@@ -152,31 +152,65 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 		return nil, fmt.Errorf("download stream: %w", err)
 	}
 
-	c.logger.Debugf("download done")
+	c.logger.Debugf("download done: key=%s", key)
 
 	return res.Body, nil
 }
 
-func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.ReadSeeker) error {
-	c.logger.Debugf("store cache: key=%s, size=%d", key, size)
-	var reserveRes struct {
+func (c *GitHubActionsCache) createCacheEntry(ctx context.Context, key string) (string, error) {
+	c.logger.Debugf("create cache entry: key=%s", key)
+	var res struct {
 		OK              bool   `json:"ok"`
 		SignedUploadURL string `json:"signed_upload_url"`
 	}
 	err := c.doRequest(ctx, "CreateCacheEntry", &struct {
 		Key     string `json:"key"`
 		Version string `json:"version"`
-	}{key, actionsCacheVersion}, &reserveRes)
+	}{key, actionsCacheVersion}, &res)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("http request: %w", err)
 	}
 
-	if !reserveRes.OK {
-		return errors.New("failed to reserve cache")
+	if !res.OK {
+		return "", errors.New("failed to create cache")
 	}
-	c.logger.Debugf("signed upload url: %s", reserveRes.SignedUploadURL)
 
-	client, err := blockblob.NewClientWithNoCredential(reserveRes.SignedUploadURL, azureClientOptions)
+	c.logger.Debugf("signed upload url: %s", res.SignedUploadURL)
+
+	return res.SignedUploadURL, nil
+}
+
+func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, size int64) error {
+	c.logger.Debugf("commit cache entry: key=%s, size=%d", key, size)
+	var res struct {
+		OK      bool   `json:"ok"`
+		EntryID string `json:"entry_id"`
+	}
+	err := c.doRequest(ctx, "FinalizeCacheEntryUpload", &struct {
+		Key       string `json:"key"`
+		SizeBytes int64  `json:"size_bytes"`
+		Version   string `json:"version"`
+	}{key, size, actionsCacheVersion}, &res)
+	if err != nil {
+		return fmt.Errorf("http request: %w", err)
+	}
+
+	if !res.OK {
+		return errors.New("failed to commit cache")
+	}
+
+	c.logger.Debugf("commit done: key=%s", key)
+
+	return nil
+}
+
+func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.ReadSeeker) error {
+	signedUploadURL, err := c.createCacheEntry(ctx, key)
+	if err != nil {
+		return fmt.Errorf("create cache entry: %w", err)
+	}
+
+	client, err := blockblob.NewClientWithNoCredential(signedUploadURL, azureClientOptions)
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)
 	}
@@ -187,23 +221,9 @@ func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size in
 
 	c.logger.Debugf("upload done")
 
-	var commitRes struct {
-		OK      bool   `json:"ok"`
-		EntryID string `json:"entry_id"`
+	if err := c.commitCacheEntry(ctx, key, size); err != nil {
+		return fmt.Errorf("commit cache entry: %w", err)
 	}
-	if err := c.doRequest(ctx, "FinalizeCacheEntryUpload", &struct {
-		Key       string `json:"key"`
-		SizeBytes int64  `json:"size_bytes"`
-		Version   string `json:"version"`
-	}{key, size, actionsCacheVersion}, &commitRes); err != nil {
-		return err
-	}
-
-	if !commitRes.OK {
-		return errors.New("failed to commit cache")
-	}
-
-	c.logger.Debugf("commit done")
 
 	return nil
 }
