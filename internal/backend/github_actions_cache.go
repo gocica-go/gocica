@@ -403,11 +403,13 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 		return fmt.Errorf("create header: %w", err)
 	}
 
-	headerBlobID := [16]byte(uuid.New())
-	strHeaderBlobID := base64.StdEncoding.EncodeToString(headerBlobID[:])
+	c.logger.Debugf("header: %v", header)
+
+	headerBlobUUID := [16]byte(uuid.New())
+	headerBlobID := base64.StdEncoding.EncodeToString(headerBlobUUID[:])
 	_, err = c.uploadClient.StageBlock(
 		ctx,
-		strHeaderBlobID,
+		headerBlobID,
 		myio.NopSeekCloser(bytes.NewReader(header)),
 		nil,
 	)
@@ -420,7 +422,7 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 	}
 
 	blockIDs := make([]string, 0, len(blockMap)+1)
-	blockIDs = append(blockIDs, strHeaderBlobID)
+	blockIDs = append(blockIDs, headerBlobID)
 	if c.oldBlockID != "" {
 		blockIDs = append(blockIDs, c.oldBlockID)
 	}
@@ -486,7 +488,7 @@ func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int6
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf("stage header block: %w", err)
+		return fmt.Errorf("stage block: %w", err)
 	}
 
 	c.logger.Debugf("stage block done: objectID=%s", objectID)
