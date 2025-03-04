@@ -249,6 +249,10 @@ func (c *GitHubActionsCache) getDownloadURL(ctx context.Context, key string, res
 		return "", fmt.Errorf("get cache entry download url: %w", err)
 	}
 
+	if !res.OK {
+		return "", errors.New("failed to get download url")
+	}
+
 	c.logger.Debugf("signed download url: %s", res.SignedDownloadURL)
 
 	return res.SignedDownloadURL, nil
