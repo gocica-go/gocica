@@ -328,20 +328,20 @@ func (c *GitHubActionsCache) createHeader(metaDataMap map[string]*v1.IndexEntry,
 }
 
 func (c *GitHubActionsCache) parseHeader(ctx context.Context) (map[string]*v1.IndexEntry, map[string]*v1.ActionsOutput, int64, int64, error) {
-	buf := make([]byte, 0, 8)
-	if err := c.loadBuffer(ctx, buf, 0, 8); err != nil {
+	sizeBuf := make([]byte, 8)
+	if err := c.loadBuffer(ctx, sizeBuf, 0, 8); err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("load header size buffer: %w", err)
 	}
 	//nolint:gosec
-	protobufSize := int64(binary.BigEndian.Uint64(buf))
+	protobufSize := int64(binary.BigEndian.Uint64(sizeBuf))
 
-	buf = make([]byte, 0, protobufSize)
-	if err := c.loadBuffer(ctx, buf, 8, protobufSize); err != nil {
+	protoBuf := make([]byte, protobufSize)
+	if err := c.loadBuffer(ctx, protoBuf, 8, protobufSize); err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("load header buffer: %w", err)
 	}
 
 	var actionsCache v1.ActionsCache
-	if err := proto.Unmarshal(buf, &actionsCache); err != nil {
+	if err := proto.Unmarshal(protoBuf, &actionsCache); err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("unmarshal: %w", err)
 	}
 
