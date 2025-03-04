@@ -3,13 +3,13 @@ package backend
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"slices"
@@ -19,7 +19,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
-	"github.com/google/uuid"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -163,9 +162,7 @@ func (c *GitHubActionsCache) uploadSetup(ctx context.Context) error {
 }
 
 func (c *GitHubActionsCache) oldBlockCopy(ctx context.Context, downloadURL string, offset, size int64) error {
-	oldBlobUUID := [16]byte(uuid.New())
-	oldBlobID := base64.StdEncoding.EncodeToString(oldBlobUUID[:])
-	_, err := c.uploadClient.StageBlockFromURL(ctx, oldBlobID, downloadURL, &blockblob.StageBlockFromURLOptions{
+	_, err := c.uploadClient.StageBlockFromURL(ctx, c.generateBlockID(), downloadURL, &blockblob.StageBlockFromURLOptions{
 		Range: blob.HTTPRange{Offset: offset, Count: size},
 	})
 	if err != nil {
@@ -381,8 +378,6 @@ func (c *GitHubActionsCache) MetaData(context.Context) (map[string]*v1.IndexEntr
 	return c.metadataMap, nil
 }
 
-var random = rand.New(rand.NewSource(0))
-
 func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
 	if c.uploadClient == nil {
 		return nil
@@ -406,12 +401,7 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 		return fmt.Errorf("create header: %w", err)
 	}
 
-	var bytesHeaderBlockID [32]byte
-	if _, err := random.Read(bytesHeaderBlockID[:]); err != nil {
-		return fmt.Errorf("random read: %w", err)
-	}
-
-	headerBlobID := base64.StdEncoding.EncodeToString(bytesHeaderBlockID[:])
+	headerBlobID := c.generateBlockID()
 	_, err = c.uploadClient.StageBlock(
 		ctx,
 		headerBlobID,
@@ -439,17 +429,8 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 
 	c.logger.Debugf("commit block list done")
 
-	indexEntryMap := &v1.IndexEntryMap{
-		Entries: metaDataMap,
-	}
-	protoBuf, err := proto.Marshal(indexEntryMap)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	c.logger.Debugf("metadata upload done")
-
-	if err := c.commitCacheEntry(ctx, key, int64(len(protoBuf))); err != nil {
+	totalSize := int64(len(header)) + outputTotalSize
+	if err := c.commitCacheEntry(ctx, key, totalSize); err != nil {
 		return fmt.Errorf("commit cache entry: %w", err)
 	}
 
@@ -504,6 +485,15 @@ func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int6
 	c.outputTotalSize += size
 
 	return err
+}
+
+func (c *GitHubActionsCache) generateBlockID() string {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		c.logger.Errorf("failed to generate random bytes: %v", err)
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(buf[:])
 }
 
 func (c *GitHubActionsCache) blobKey() (string, []string) {
