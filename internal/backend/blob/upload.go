@@ -2,6 +2,7 @@ package blob
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
@@ -23,25 +24,25 @@ type Uploader struct {
 }
 
 type UploadClient interface {
-	UploadBlock(blobID string, r io.ReadSeekCloser) (int64, error)
-	UploadBlockFromURL(blobID string, url string, offset, size int64) error
-	Commit(blobIDs []string) error
+	UploadBlock(ctx context.Context, blockID string, r io.ReadSeekCloser) (int64, error)
+	UploadBlockFromURL(ctx context.Context, blockID string, url string, offset, size int64) error
+	Commit(ctx context.Context, blockIDs []string) error
 }
 
 type BaseBlobProvider interface {
-	GetOutputs() (outputs map[string]*v1.ActionsOutput, err error)
-	GetOutputBlockURL() (url string, offset, size int64, err error)
+	GetOutputs(ctx context.Context) (outputs map[string]*v1.ActionsOutput, err error)
+	GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error)
 }
 
-type waitBaseFunc func() (baseBlobID string, baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput, err error)
+type waitBaseFunc func() (baseBlockID string, baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput, err error)
 
-func NewUploader(client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
+func NewUploader(ctx context.Context, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
 	uploader := &Uploader{
 		client:        client,
 		outputSizeMap: map[string]int64{},
 	}
 
-	uploader.waitBaseFunc = uploader.setupBase(baseBlobProvider)
+	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
 
 	return uploader
 }
@@ -54,27 +55,27 @@ func (u *Uploader) getenarteBlockID() (string, error) {
 	return base64.StdEncoding.EncodeToString(buf[:]), nil
 }
 
-func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
-	eg := &errgroup.Group{}
+func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvider) waitBaseFunc {
+	eg, ctx := errgroup.WithContext(ctx)
 
 	var (
-		baseBlobID     string
+		baseBlockID    string
 		baseOutputSize int64
 	)
 	eg.Go(func() error {
 		var err error
-		baseBlobID, err = u.getenarteBlockID()
+		baseBlockID, err = u.getenarteBlockID()
 		if err != nil {
 			return fmt.Errorf("generate block ID: %w", err)
 		}
 
-		url, offset, size, err := baseBlobProvider.GetOutputBlockURL()
+		url, offset, size, err := baseBlobProvider.GetOutputBlockURL(ctx)
 		if err != nil {
 			return fmt.Errorf("get output block URL: %w", err)
 		}
 		baseOutputSize = size
 
-		err = u.client.UploadBlockFromURL(baseBlobID, url, offset, size)
+		err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset, size)
 		if err != nil {
 			return fmt.Errorf("upload block from URL: %w", err)
 		}
@@ -85,7 +86,7 @@ func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	var baseOutputs map[string]*v1.ActionsOutput
 	eg.Go(func() error {
 		var err error
-		baseOutputs, err = baseBlobProvider.GetOutputs()
+		baseOutputs, err = baseBlobProvider.GetOutputs(ctx)
 		if err != nil {
 			return fmt.Errorf("download outputs: %w", err)
 		}
@@ -98,12 +99,12 @@ func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 			return "", 0, nil, err
 		}
 
-		return baseBlobID, baseOutputSize, baseOutputs, nil
+		return baseBlockID, baseOutputSize, baseOutputs, nil
 	}
 }
 
-func (u *Uploader) UploadOutput(outputID string, size int64, r io.ReadSeekCloser) error {
-	n, err := u.client.UploadBlock(outputID, r)
+func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64, r io.ReadSeekCloser) error {
+	n, err := u.client.UploadBlock(ctx, outputID, r)
 	if err != nil {
 		return fmt.Errorf("upload block: %w", err)
 	}
@@ -164,7 +165,7 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[s
 	return buf, nil
 }
 
-func (u *Uploader) Commit(entries map[string]*v1.IndexEntry) error {
+func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) error {
 	baseBlockID, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
 	if err != nil {
 		return fmt.Errorf("wait base: %w", err)
@@ -182,13 +183,13 @@ func (u *Uploader) Commit(entries map[string]*v1.IndexEntry) error {
 		return fmt.Errorf("generate header block ID: %w", err)
 	}
 
-	_, err = u.client.UploadBlock(headerBlockID, myio.NopSeekCloser(bytes.NewReader(headerBuf)))
+	_, err = u.client.UploadBlock(ctx, headerBlockID, myio.NopSeekCloser(bytes.NewReader(headerBuf)))
 	if err != nil {
 		return fmt.Errorf("upload header: %w", err)
 	}
 
 	blockIDs := append([]string{headerBlockID, baseBlockID}, newOutputIDs...)
-	err = u.client.Commit(blockIDs)
+	err = u.client.Commit(ctx, blockIDs)
 	if err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}

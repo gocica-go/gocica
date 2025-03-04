@@ -1,6 +1,7 @@
 package blob
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -17,18 +18,18 @@ type Downloader struct {
 }
 
 type DownloadClient interface {
-	GetURL() string
-	DownloadBlock(offset int64, size int64, w io.Writer) error
-	DownloadBlockBuffer(offset int64, size int64, buf []byte) error
+	GetURL(ctx context.Context) string
+	DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error
+	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
 
-func NewDownloader(client DownloadClient) (*Downloader, error) {
+func NewDownloader(ctx context.Context, client DownloadClient) (*Downloader, error) {
 	downloader := &Downloader{
 		client: client,
 	}
 
 	var err error
-	downloader.header, downloader.headerSize, err = downloader.readHeader()
+	downloader.header, downloader.headerSize, err = downloader.readHeader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
@@ -36,9 +37,9 @@ func NewDownloader(client DownloadClient) (*Downloader, error) {
 	return downloader, nil
 }
 
-func (d *Downloader) readHeader() (header *v1.ActionsCache, headerSize int64, err error) {
+func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, headerSize int64, err error) {
 	sizeBuf := make([]byte, 8)
-	err = d.client.DownloadBlockBuffer(0, 8, sizeBuf)
+	err = d.client.DownloadBlockBuffer(ctx, 0, 8, sizeBuf)
 	if err != nil {
 		return nil, 0, fmt.Errorf("download size buffer: %w", err)
 	}
@@ -46,7 +47,7 @@ func (d *Downloader) readHeader() (header *v1.ActionsCache, headerSize int64, er
 	protobufSize := int64(binary.BigEndian.Uint64(sizeBuf))
 
 	protoBuf := make([]byte, protobufSize)
-	err = d.client.DownloadBlockBuffer(8, protobufSize, protoBuf)
+	err = d.client.DownloadBlockBuffer(ctx, 8, protobufSize, protoBuf)
 	if err != nil {
 		return nil, 0, fmt.Errorf("download header buffer: %w", err)
 	}
@@ -59,16 +60,16 @@ func (d *Downloader) readHeader() (header *v1.ActionsCache, headerSize int64, er
 	return header, 8 + int64(len(protoBuf)), nil
 }
 
-func (d *Downloader) GetEntries() (metadata map[string]*v1.IndexEntry, err error) {
+func (d *Downloader) GetEntries(context.Context) (metadata map[string]*v1.IndexEntry, err error) {
 	return d.header.Entries, nil
 }
 
-func (d *Downloader) GetOutputs() (outputs map[string]*v1.ActionsOutput, err error) {
+func (d *Downloader) GetOutputs(context.Context) (outputs map[string]*v1.ActionsOutput, err error) {
 	return d.header.Outputs, nil
 }
 
-func (d *Downloader) GetOutputBlockURL() (url string, offset, size int64, err error) {
-	url = d.client.GetURL()
+func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error) {
+	url = d.client.GetURL(ctx)
 	offset = d.headerSize
 	size = d.header.OutputTotalSize
 
@@ -77,7 +78,7 @@ func (d *Downloader) GetOutputBlockURL() (url string, offset, size int64, err er
 
 var ErrOutputNotFound = errors.New("output not found")
 
-func (d *Downloader) DownloadOutputBlock(blobID string, w io.Writer) error {
+func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w io.Writer) error {
 	output, ok := d.header.Outputs[blobID]
 	if !ok {
 		return ErrOutputNotFound
@@ -88,7 +89,7 @@ func (d *Downloader) DownloadOutputBlock(blobID string, w io.Writer) error {
 	}
 
 	offset := d.headerSize + output.Offset
-	if err := d.client.DownloadBlock(offset, output.Size, w); err != nil {
+	if err := d.client.DownloadBlock(ctx, offset, output.Size, w); err != nil {
 		return fmt.Errorf("download block: %w", err)
 	}
 

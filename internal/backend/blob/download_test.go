@@ -2,6 +2,7 @@ package blob
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -17,7 +18,7 @@ type mockDownloadClient struct {
 	calls []mockCall
 }
 
-func (m *mockDownloadClient) GetURL() string {
+func (m *mockDownloadClient) GetURL(context.Context) string {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "GetURL" {
@@ -29,55 +30,48 @@ func (m *mockDownloadClient) GetURL() string {
 	return ""
 }
 
-func (m *mockDownloadClient) DownloadBlock(offset int64, size int64, w io.Writer) error {
+func (m *mockDownloadClient) DownloadBlock(_ context.Context, offset int64, size int64, w io.Writer) error {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "DownloadBlock" {
-			if len(call.args) < 3 {
-				continue
-			}
-			if off, ok := call.args[0].(int64); !ok || off != offset {
-				continue
-			}
-			if sz, ok := call.args[1].(int64); !ok || sz != size {
-				continue
-			}
-			if call.result[1] != nil {
-				if err, ok := call.result[1].(error); ok {
+			expectedOffset, ok1 := call.args[1].(int64)
+			expectedSize, ok2 := call.args[2].(int64)
+
+			if ok1 && ok2 && expectedOffset == offset && expectedSize == size {
+				if call.result[1] != nil {
+					if err, ok := call.result[1].(error); ok {
+						return err
+					}
+				}
+				if data, ok := call.result[0].([]byte); ok {
+					_, err := w.Write(data)
 					return err
 				}
+				return nil
 			}
-			if data, ok := call.result[0].([]byte); ok {
-				_, err := w.Write(data)
-				return err
-			}
-			return nil
 		}
 	}
 	return errors.New("unexpected DownloadBlock call")
 }
 
-func (m *mockDownloadClient) DownloadBlockBuffer(offset int64, size int64, buf []byte) error {
+func (m *mockDownloadClient) DownloadBlockBuffer(_ context.Context, offset int64, size int64, buf []byte) error {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "DownloadBlockBuffer" {
-			if len(call.args) < 3 {
-				continue
-			}
-			if off, ok := call.args[0].(int64); !ok || off != offset {
-				continue
-			}
-			if sz, ok := call.args[1].(int64); !ok || sz != size {
-				continue
-			}
-			if call.result[1] == nil {
+			expectedOffset, ok1 := call.args[1].(int64)
+			expectedSize, ok2 := call.args[2].(int64)
+
+			if ok1 && ok2 && expectedOffset == offset && expectedSize == size {
+				if call.result[1] != nil {
+					if err, ok := call.result[1].(error); ok {
+						return err
+					}
+				}
+
 				if data, ok := call.result[0].([]byte); ok {
 					copy(buf, data)
 				}
 				return nil
-			}
-			if err, ok := call.result[1].(error); ok {
-				return err
 			}
 		}
 	}
@@ -87,6 +81,7 @@ func (m *mockDownloadClient) DownloadBlockBuffer(offset int64, size int64, buf [
 func (m *mockDownloadClient) expectGetURL(url string) {
 	m.calls = append(m.calls, mockCall{
 		method: "GetURL",
+		args:   []any{nil}, // Add context placeholder as nil
 		result: []any{url},
 	})
 }
@@ -94,7 +89,7 @@ func (m *mockDownloadClient) expectGetURL(url string) {
 func (m *mockDownloadClient) expectDownloadBlock(offset, size int64, data []byte, err error) {
 	m.calls = append(m.calls, mockCall{
 		method: "DownloadBlock",
-		args:   []any{offset, size, nil},
+		args:   []any{nil, offset, size}, // Remove nil writer as it's provided during the call
 		result: []any{data, err},
 	})
 }
@@ -102,7 +97,7 @@ func (m *mockDownloadClient) expectDownloadBlock(offset, size int64, data []byte
 func (m *mockDownloadClient) expectDownloadBlockBuffer(offset, size int64, data []byte, err error) {
 	m.calls = append(m.calls, mockCall{
 		method: "DownloadBlockBuffer",
-		args:   []any{offset, size, nil},
+		args:   []any{nil, offset, size, nil}, // Add context placeholder as nil
 		result: []any{data, err},
 	})
 }
@@ -206,7 +201,7 @@ func TestNewDownloader(t *testing.T) {
 
 			_ = tt.setupMock(client, header)
 
-			downloader, err := NewDownloader(client)
+			downloader, err := NewDownloader(t.Context(), client)
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -305,12 +300,12 @@ func TestDownloader_GetEntries(t *testing.T) {
 			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
 			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
 
-			downloader, err := NewDownloader(client)
+			downloader, err := NewDownloader(t.Context(), client)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			entries, err := downloader.GetEntries()
+			entries, err := downloader.GetEntries(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -425,13 +420,13 @@ func TestDownloader_DownloadOutputBlock(t *testing.T) {
 				tt.setupMock(client, headerSize)
 			}
 
-			downloader, err := NewDownloader(client)
+			downloader, err := NewDownloader(t.Context(), client)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			var buf bytes.Buffer
-			err = downloader.DownloadOutputBlock(tt.blobID, &buf)
+			err = downloader.DownloadOutputBlock(t.Context(), tt.blobID, &buf)
 
 			if tt.expectError {
 				if err == nil {
@@ -517,12 +512,12 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 				tt.setupMock(client)
 			}
 
-			downloader, err := NewDownloader(client)
+			downloader, err := NewDownloader(t.Context(), client)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			url, offset, size, err := downloader.GetOutputBlockURL()
+			url, offset, size, err := downloader.GetOutputBlockURL(t.Context())
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
