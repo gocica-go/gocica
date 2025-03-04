@@ -39,13 +39,15 @@ type GitHubActionsCache struct {
 	baseOffset                   int64
 	downloadClient, uploadClient *blockblob.Client
 
-	metadataMap     map[string]*v1.IndexEntry
-	outputMap       map[string]*v1.ActionsOutput
-	oldBlockID      string
-	oldBlockCopyEg  *errgroup.Group
-	blockMapLocker  sync.RWMutex
-	blockMap        map[string]int64
-	outputTotalSize int64
+	oldMetadataMap     map[string]*v1.IndexEntry
+	oldOutputMap       map[string]*v1.ActionsOutput
+	oldOutputTotalSize int64
+
+	copyOutputBlockID string
+	outputBlockCopyEg *errgroup.Group
+
+	newOutputBlockSizeMapLocker sync.RWMutex
+	newOutputBlockSizeMap       map[string]int64
 
 	runnerOS, ref, sha string
 }
@@ -67,14 +69,14 @@ func NewGitHubActionsCache(
 	}))
 
 	c := &GitHubActionsCache{
-		logger:         logger,
-		githubClient:   githubClient,
-		baseURL:        baseURL,
-		oldBlockCopyEg: &errgroup.Group{},
-		blockMap:       map[string]int64{},
-		runnerOS:       runnerOS,
-		ref:            ref,
-		sha:            sha,
+		logger:                logger,
+		githubClient:          githubClient,
+		baseURL:               baseURL,
+		outputBlockCopyEg:     &errgroup.Group{},
+		newOutputBlockSizeMap: map[string]int64{},
+		runnerOS:              runnerOS,
+		ref:                   ref,
+		sha:                   sha,
 	}
 
 	eg := &errgroup.Group{}
@@ -97,7 +99,7 @@ func NewGitHubActionsCache(
 	}
 
 	if downloadURL != "" {
-		c.oldBlockCopyEg.Go(func() error {
+		c.outputBlockCopyEg.Go(func() error {
 			return c.oldBlockCopy(context.Background(), downloadURL, headerOffset, oldBlobSize)
 		})
 	}
@@ -133,9 +135,9 @@ func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (string, int64, 
 		return "", 0, 0, fmt.Errorf("parse header: %w", err)
 	}
 
-	c.metadataMap = metadataMap
-	c.outputMap = outputMap
-	c.outputTotalSize = outputTotalSize
+	c.oldMetadataMap = metadataMap
+	c.oldOutputMap = outputMap
+	c.oldOutputTotalSize = outputTotalSize
 	c.baseOffset = headerOffset
 
 	c.logger.Debugf("download setup done: metadataMapKeys=%v, outputMapKeys=%v, outputTotalSize=%d, headerOffset=%d",
@@ -311,30 +313,36 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 	return nil
 }
 
-func (c *GitHubActionsCache) createHeader(metaDataMap map[string]*v1.IndexEntry, blockMap map[string]int64, outputTotalSize int64) ([]byte, error) {
-	offset := int64(0)
-	outputMap := make(map[string]*v1.ActionsOutput, len(blockMap))
-	for k, v := range blockMap {
-		outputMap[k] = &v1.ActionsOutput{
+func (c *GitHubActionsCache) createHeader(newMetaDataMap map[string]*v1.IndexEntry, newOutputBlockSizeMap map[string]int64) ([]byte, int64, error) {
+	outputMap := make(map[string]*v1.ActionsOutput, len(c.oldOutputMap)+len(c.newOutputBlockSizeMap))
+	for outputID, actionsOutput := range c.oldOutputMap {
+		outputMap[outputID] = actionsOutput
+	}
+
+	offset := c.baseOffset + c.oldOutputTotalSize
+	outputTotalSize := c.oldOutputTotalSize
+	for outputID, size := range newOutputBlockSizeMap {
+		outputMap[outputID] = &v1.ActionsOutput{
 			Offset: offset,
 		}
-		offset += v
+		offset += size
+		outputTotalSize += size
 	}
 
 	protoBuf, err := proto.Marshal(&v1.ActionsCache{
-		Entries:         metaDataMap,
+		Entries:         newMetaDataMap,
 		Outputs:         outputMap,
 		OutputTotalSize: outputTotalSize,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal metadata: %w", err)
+		return nil, 0, fmt.Errorf("marshal metadata: %w", err)
 	}
 
 	buf := make([]byte, 8, 8+len(protoBuf))
 	binary.BigEndian.PutUint64(buf, uint64(len(protoBuf)))
 	buf = append(buf, protoBuf...)
 
-	return buf, nil
+	return buf, outputTotalSize, nil
 }
 
 func (c *GitHubActionsCache) parseHeader(ctx context.Context) (map[string]*v1.IndexEntry, map[string]*v1.ActionsOutput, int64, int64, error) {
@@ -385,7 +393,7 @@ func (c *GitHubActionsCache) loadStream(ctx context.Context, w io.Writer, offset
 }
 
 func (c *GitHubActionsCache) MetaData(context.Context) (map[string]*v1.IndexEntry, error) {
-	return c.metadataMap, nil
+	return c.oldMetadataMap, nil
 }
 
 func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
@@ -395,18 +403,14 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 
 	key, _ := c.blobKey()
 
-	var (
-		blockMap        map[string]int64
-		outputTotalSize int64
-	)
+	var newOutputBlockSizeMap map[string]int64
 	func() {
-		c.blockMapLocker.RLock()
-		defer c.blockMapLocker.RUnlock()
-		blockMap = c.blockMap
-		outputTotalSize = c.outputTotalSize
+		c.newOutputBlockSizeMapLocker.RLock()
+		defer c.newOutputBlockSizeMapLocker.RUnlock()
+		newOutputBlockSizeMap = c.newOutputBlockSizeMap
 	}()
 
-	header, err := c.createHeader(metaDataMap, blockMap, outputTotalSize)
+	header, outputTotalSize, err := c.createHeader(metaDataMap, newOutputBlockSizeMap)
 	if err != nil {
 		return fmt.Errorf("create header: %w", err)
 	}
@@ -422,16 +426,16 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 		return fmt.Errorf("stage header block: %w", err)
 	}
 
-	if err := c.oldBlockCopyEg.Wait(); err != nil {
+	if err := c.outputBlockCopyEg.Wait(); err != nil {
 		return fmt.Errorf("old block copy: %w", err)
 	}
 
-	blockIDs := make([]string, 0, len(blockMap)+1)
+	blockIDs := make([]string, 0, len(newOutputBlockSizeMap)+1)
 	blockIDs = append(blockIDs, headerBlobID)
-	if c.oldBlockID != "" {
-		blockIDs = append(blockIDs, c.oldBlockID)
+	if c.copyOutputBlockID != "" {
+		blockIDs = append(blockIDs, c.copyOutputBlockID)
 	}
-	blockIDs = append(blockIDs, slices.Collect(maps.Keys(blockMap))...)
+	blockIDs = append(blockIDs, slices.Collect(maps.Keys(newOutputBlockSizeMap))...)
 
 	if _, err := c.uploadClient.CommitBlockList(ctx, blockIDs, nil); err != nil {
 		return fmt.Errorf("commit block list: %w", err)
@@ -452,7 +456,7 @@ func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, size int6
 		return nil
 	}
 
-	object, ok := c.outputMap[objectID]
+	object, ok := c.oldOutputMap[objectID]
 	if !ok {
 		return nil
 	}
@@ -489,10 +493,9 @@ func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int6
 
 	c.logger.Debugf("stage block done: objectID=%s", objectID)
 
-	c.blockMapLocker.Lock()
-	defer c.blockMapLocker.Unlock()
-	c.blockMap[objectID] = size
-	c.outputTotalSize += size
+	c.newOutputBlockSizeMapLocker.Lock()
+	defer c.newOutputBlockSizeMapLocker.Unlock()
+	c.newOutputBlockSizeMap[objectID] = size
 
 	return err
 }
