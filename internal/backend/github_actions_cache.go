@@ -138,7 +138,7 @@ func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (string, int64, 
 	c.outputTotalSize = outputTotalSize
 	c.baseOffset = headerOffset
 
-	c.logger.Debugf("download setup done: metadataMapKeys=%v, outputMapKeys=%v, outputTotalSize=%d",
+	c.logger.Debugf("download setup done: metadataMapKeys=%v, outputMapKeys=%v, outputTotalSize=%d, headerOffset=%d",
 		slices.Collect(maps.Keys(metadataMap)),
 		slices.Collect(maps.Keys(outputMap)),
 		outputTotalSize, headerOffset,
@@ -168,6 +168,10 @@ func (c *GitHubActionsCache) uploadSetup(ctx context.Context) error {
 }
 
 func (c *GitHubActionsCache) oldBlockCopy(ctx context.Context, downloadURL string, offset, size int64) error {
+	if c.uploadClient == nil {
+		return nil
+	}
+
 	_, err := c.uploadClient.StageBlockFromURL(ctx, c.generateBlockID(), downloadURL, &blockblob.StageBlockFromURLOptions{
 		Range: blob.HTTPRange{Offset: offset, Count: size},
 	})
