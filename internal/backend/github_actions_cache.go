@@ -118,11 +118,9 @@ func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (string, int64, 
 
 	downloadURL, err := c.getDownloadURL(context.Background(), blobKey, restoreKeys)
 	if err != nil {
-		if errors.Is(err, errActionsCacheNotFound) {
-			c.logger.Infof("cache not found, creating new cache entry")
-			return "", 0, 0, nil
-		}
-		return "", 0, 0, fmt.Errorf("get download url: %w", err)
+		c.logger.Debugf("get download url: %v", err)
+		c.logger.Infof("cache not found, creating new cache entry")
+		return "", 0, 0, nil
 	}
 
 	c.downloadClient, err = blockblob.NewClientWithNoCredential(downloadURL, azureClientOptions)
