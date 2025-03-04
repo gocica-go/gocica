@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"slices"
@@ -380,6 +381,8 @@ func (c *GitHubActionsCache) MetaData(context.Context) (map[string]*v1.IndexEntr
 	return c.metadataMap, nil
 }
 
+var random = rand.New(rand.NewSource(0))
+
 func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
 	if c.uploadClient == nil {
 		return nil
@@ -403,10 +406,12 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 		return fmt.Errorf("create header: %w", err)
 	}
 
-	c.logger.Debugf("header: %v", header)
+	var bytesHeaderBlockID [32]byte
+	if _, err := random.Read(bytesHeaderBlockID[:]); err != nil {
+		return fmt.Errorf("random read: %w", err)
+	}
 
-	headerBlobUUID := [16]byte(uuid.New())
-	headerBlobID := base64.StdEncoding.EncodeToString(headerBlobUUID[:])
+	headerBlobID := base64.StdEncoding.EncodeToString(bytesHeaderBlockID[:])
 	_, err = c.uploadClient.StageBlock(
 		ctx,
 		headerBlobID,
