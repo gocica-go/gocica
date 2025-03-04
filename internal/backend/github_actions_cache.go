@@ -136,7 +136,9 @@ func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (string, int64, 
 	c.metadataMap = metadataMap
 	c.outputMap = outputMap
 	c.outputTotalSize = outputTotalSize
-	c.baseOffset = headerOffset + outputTotalSize
+	c.baseOffset = headerOffset
+
+	c.logger.Debugf("download setup done: metadataMapKeys=%v, outputMapKeys=%v, outputTotalSize=%d", maps.Keys(metadataMap), maps.Keys(outputMap), outputTotalSize, headerOffset)
 
 	return downloadURL, headerOffset, outputTotalSize, nil
 }
