@@ -138,7 +138,7 @@ type mockBaseBlobProvider struct {
 	calls []mockCall
 }
 
-func (m *mockBaseBlobProvider) DownloadOutputs() (map[string]*v1.ActionsOutput, error) {
+func (m *mockBaseBlobProvider) GetOutputs() (map[string]*v1.ActionsOutput, error) {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "DownloadOutputs" {

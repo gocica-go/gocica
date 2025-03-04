@@ -29,7 +29,7 @@ type UploadClient interface {
 }
 
 type BaseBlobProvider interface {
-	DownloadOutputs() (outputs map[string]*v1.ActionsOutput, err error)
+	GetOutputs() (outputs map[string]*v1.ActionsOutput, err error)
 	GetOutputBlockURL() (url string, offset, size int64, err error)
 }
 
@@ -85,7 +85,7 @@ func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	var baseOutputs map[string]*v1.ActionsOutput
 	eg.Go(func() error {
 		var err error
-		baseOutputs, err = baseBlobProvider.DownloadOutputs()
+		baseOutputs, err = baseBlobProvider.GetOutputs()
 		if err != nil {
 			return fmt.Errorf("download outputs: %w", err)
 		}
