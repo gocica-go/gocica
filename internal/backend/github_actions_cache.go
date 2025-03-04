@@ -78,10 +78,13 @@ func NewGitHubActionsCache(
 	}
 
 	eg := &errgroup.Group{}
-	var headerOffset, oldBlobSize int64
+	var (
+		downloadURL               string
+		headerOffset, oldBlobSize int64
+	)
 	eg.Go(func() error {
 		var err error
-		headerOffset, oldBlobSize, err = c.downloadSetup(context.Background())
+		downloadURL, headerOffset, oldBlobSize, err = c.downloadSetup(context.Background())
 		return err
 	})
 
@@ -93,9 +96,9 @@ func NewGitHubActionsCache(
 		return nil, fmt.Errorf("download setup: %w", err)
 	}
 
-	if c.downloadClient != nil {
+	if downloadURL != "" {
 		c.oldBlockCopyEg.Go(func() error {
-			return c.oldBlockCopy(context.Background(), c.downloadClient.URL(), headerOffset, oldBlobSize)
+			return c.oldBlockCopy(context.Background(), downloadURL, headerOffset, oldBlobSize)
 		})
 	}
 
@@ -110,26 +113,26 @@ const (
 	actionsCacheSeparator = "-"
 )
 
-func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (int64, int64, error) {
+func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (string, int64, int64, error) {
 	blobKey, restoreKeys := c.blobKey()
 
 	downloadURL, err := c.getDownloadURL(context.Background(), blobKey, restoreKeys)
 	if err != nil {
 		if errors.Is(err, errActionsCacheNotFound) {
 			c.logger.Infof("cache not found, creating new cache entry")
-			return 0, 0, nil
+			return "", 0, 0, nil
 		}
-		return 0, 0, fmt.Errorf("get download url: %w", err)
+		return "", 0, 0, fmt.Errorf("get download url: %w", err)
 	}
 
 	c.downloadClient, err = blockblob.NewClientWithNoCredential(downloadURL, azureClientOptions)
 	if err != nil {
-		return 0, 0, fmt.Errorf("create download client: %w", err)
+		return "", 0, 0, fmt.Errorf("create download client: %w", err)
 	}
 
 	metadataMap, outputMap, outputTotalSize, headerOffset, err := c.parseHeader(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("parse header: %w", err)
+		return "", 0, 0, fmt.Errorf("parse header: %w", err)
 	}
 
 	c.metadataMap = metadataMap
@@ -137,7 +140,7 @@ func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (int64, int64, e
 	c.outputTotalSize = outputTotalSize
 	c.baseOffset = headerOffset + outputTotalSize
 
-	return headerOffset, outputTotalSize, nil
+	return downloadURL, headerOffset, outputTotalSize, nil
 }
 
 func (c *GitHubActionsCache) uploadSetup(ctx context.Context) error {
@@ -327,14 +330,14 @@ func (c *GitHubActionsCache) createHeader(metaDataMap map[string]*v1.IndexEntry,
 func (c *GitHubActionsCache) parseHeader(ctx context.Context) (map[string]*v1.IndexEntry, map[string]*v1.ActionsOutput, int64, int64, error) {
 	buf := make([]byte, 0, 8)
 	if err := c.loadBuffer(ctx, buf, 0, 8); err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("load buffer: %w", err)
+		return nil, nil, 0, 0, fmt.Errorf("load header size buffer: %w", err)
 	}
 	//nolint:gosec
 	protobufSize := int64(binary.BigEndian.Uint64(buf))
 
 	buf = make([]byte, 0, protobufSize)
 	if err := c.loadBuffer(ctx, buf, 8, protobufSize); err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("load buffer: %w", err)
+		return nil, nil, 0, 0, fmt.Errorf("load header buffer: %w", err)
 	}
 
 	var actionsCache v1.ActionsCache
