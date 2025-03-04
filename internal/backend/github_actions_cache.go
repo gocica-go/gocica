@@ -322,7 +322,7 @@ func (c *GitHubActionsCache) createHeader(metaDataMap map[string]*v1.IndexEntry,
 		return nil, fmt.Errorf("marshal metadata: %w", err)
 	}
 
-	buf := make([]byte, 0, 8+len(protoBuf))
+	buf := make([]byte, 8, 8+len(protoBuf))
 	binary.BigEndian.PutUint64(buf, uint64(len(protoBuf)))
 	buf = append(buf, protoBuf...)
 
