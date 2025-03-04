@@ -510,6 +510,7 @@ func (c *GitHubActionsCache) blobKey() (string, []string) {
 		restoreKeys = append(restoreKeys, baseKey)
 		baseKey += k
 	}
+	slices.Reverse(restoreKeys)
 
 	return baseKey, restoreKeys
 }
