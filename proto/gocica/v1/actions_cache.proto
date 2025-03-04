@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package gocica.v1;
+
+option go_package = "github.com/mazrean/gocica/proto/gocica/v1";
+
+import "gocica/v1/index_entry.proto";
+
+message ActionsOutput {
+  int64 offset = 1;
+}
+
+message ActionsCache {
+  map<string, IndexEntry> entries = 1;
+  map<string, ActionsOutput> outputs = 2;
+  int64 output_total_size = 3;
+}

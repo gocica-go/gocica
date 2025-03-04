@@ -34,7 +34,7 @@ type LocalBackend interface {
 type RemoteBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
 	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
-	Get(ctx context.Context, objectID string, w io.Writer) error
+	Get(ctx context.Context, objectID string, size int64, w io.Writer) error
 	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
 	Close(ctx context.Context) error
 }
@@ -153,7 +153,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 		eg.Go(func() error {
 			defer pw.Close()
 
-			err := b.remote.Get(ctx, indexEntry.OutputId, pw)
+			err := b.remote.Get(ctx, indexEntry.OutputId, indexEntry.Size, pw)
 			if err != nil {
 				return fmt.Errorf("get remote cache: %w", err)
 			}

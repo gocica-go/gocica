@@ -164,7 +164,7 @@ func TestPutAndGet(t *testing.T) {
 
 			// Verify the operation by using Get with new signature.
 			var buf bytes.Buffer
-			err = s3Inst.Get(t.Context(), tc.outputID, &buf)
+			err = s3Inst.Get(t.Context(), tc.outputID, tc.size, &buf)
 
 			if tc.isGetErr {
 				if err == nil {
