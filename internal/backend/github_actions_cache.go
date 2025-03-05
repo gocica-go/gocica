@@ -3,29 +3,22 @@ package backend
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/mazrean/gocica/internal/backend/blob"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 )
 
 var _ RemoteBackend = &GitHubActionsCache{}
@@ -36,18 +29,8 @@ type GitHubActionsCache struct {
 	baseURL      *url.URL
 	githubClient *http.Client
 
-	baseOffset                   int64
-	downloadClient, uploadClient *blockblob.Client
-
-	oldMetadataMap     map[string]*v1.IndexEntry
-	oldOutputMap       map[string]*v1.ActionsOutput
-	oldOutputTotalSize int64
-
-	copyOutputBlockID string
-	outputBlockCopyEg *errgroup.Group
-
-	newOutputBlockSizeMapLocker sync.RWMutex
-	newOutputBlockSizeMap       map[string]int64
+	uploader   *blob.Uploader
+	downloader *blob.Downloader
 
 	runnerOS, ref, sha string
 }
@@ -69,39 +52,21 @@ func NewGitHubActionsCache(
 	}))
 
 	c := &GitHubActionsCache{
-		logger:                logger,
-		githubClient:          githubClient,
-		baseURL:               baseURL,
-		outputBlockCopyEg:     &errgroup.Group{},
-		newOutputBlockSizeMap: map[string]int64{},
-		runnerOS:              runnerOS,
-		ref:                   ref,
-		sha:                   sha,
+		logger:       logger,
+		githubClient: githubClient,
+		baseURL:      baseURL,
+		runnerOS:     runnerOS,
+		ref:          ref,
+		sha:          sha,
 	}
 
-	eg := &errgroup.Group{}
-	var (
-		downloadURL               string
-		headerOffset, oldBlobSize int64
-	)
-	eg.Go(func() error {
-		var err error
-		downloadURL, headerOffset, oldBlobSize, err = c.downloadSetup(context.Background())
-		return err
-	})
-
-	if err := c.uploadSetup(context.Background()); err != nil {
-		return nil, fmt.Errorf("upload setup: %w", err)
+	downloadURL, err := c.setupDownloader(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("setup downloader: %w", err)
 	}
 
-	if err := eg.Wait(); err != nil {
-		return nil, fmt.Errorf("download setup: %w", err)
-	}
-
-	if downloadURL != "" {
-		c.outputBlockCopyEg.Go(func() error {
-			return c.oldBlockCopy(context.Background(), downloadURL, headerOffset, oldBlobSize)
-		})
+	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
+		return nil, fmt.Errorf("setup uploader: %w", err)
 	}
 
 	logger.Infof("GitHub Actions cache backend initialized.")
@@ -115,41 +80,32 @@ const (
 	actionsCacheSeparator = "-"
 )
 
-func (c *GitHubActionsCache) downloadSetup(ctx context.Context) (string, int64, int64, error) {
+func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error) {
 	blobKey, restoreKeys := c.blobKey()
 
 	downloadURL, err := c.getDownloadURL(context.Background(), blobKey, restoreKeys)
 	if err != nil {
 		c.logger.Debugf("get download url: %v", err)
 		c.logger.Infof("cache not found, creating new cache entry")
-		return "", 0, 0, nil
+		return "", nil
 	}
 
-	c.downloadClient, err = blockblob.NewClientWithNoCredential(downloadURL, azureClientOptions)
+	downloadClient, err := blockblob.NewClientWithNoCredential(downloadURL, &blockblob.ClientOptions{
+		ClientOptions: azcore.ClientOptions{},
+	})
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("create download client: %w", err)
+		return "", fmt.Errorf("create download client: %w", err)
 	}
 
-	metadataMap, outputMap, outputTotalSize, headerOffset, err := c.parseHeader(ctx)
+	c.downloader, err = blob.NewDownloader(ctx, blob.NewAzureDownloadClient(downloadClient))
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("parse header: %w", err)
+		return "", fmt.Errorf("create downloader: %w", err)
 	}
 
-	c.oldMetadataMap = metadataMap
-	c.oldOutputMap = outputMap
-	c.oldOutputTotalSize = outputTotalSize
-	c.baseOffset = headerOffset
-
-	c.logger.Debugf("download setup done: metadataMapKeys=%v, outputMapKeys=%v, outputTotalSize=%d, headerOffset=%d",
-		slices.Collect(maps.Keys(metadataMap)),
-		slices.Collect(maps.Keys(outputMap)),
-		outputTotalSize, headerOffset,
-	)
-
-	return downloadURL, headerOffset, outputTotalSize, nil
+	return downloadURL, nil
 }
 
-func (c *GitHubActionsCache) uploadSetup(ctx context.Context) error {
+func (c *GitHubActionsCache) setupUploader(ctx context.Context, downloadURL string) error {
 	blobKey, _ := c.blobKey()
 
 	uploadURL, err := c.createCacheEntry(ctx, blobKey)
@@ -161,24 +117,17 @@ func (c *GitHubActionsCache) uploadSetup(ctx context.Context) error {
 		return fmt.Errorf("create cache entry: %w", err)
 	}
 
-	c.uploadClient, err = blockblob.NewClientWithNoCredential(uploadURL, azureClientOptions)
+	uploadClient, err := blockblob.NewClientWithNoCredential(uploadURL, &blockblob.ClientOptions{
+		ClientOptions: azcore.ClientOptions{},
+	})
 	if err != nil {
 		return fmt.Errorf("create upload client: %w", err)
 	}
 
-	return nil
-}
-
-func (c *GitHubActionsCache) oldBlockCopy(ctx context.Context, downloadURL string, offset, size int64) error {
-	if c.uploadClient == nil {
-		return nil
-	}
-
-	_, err := c.uploadClient.StageBlockFromURL(ctx, c.generateBlockID(), downloadURL, &blockblob.StageBlockFromURLOptions{
-		Range: blob.HTTPRange{Offset: offset, Count: size},
-	})
-	if err != nil {
-		return fmt.Errorf("stage block from url: %w", err)
+	if downloadURL == "" {
+		c.uploader = blob.NewUploader(ctx, blob.NewAzureUploadClient(uploadClient), nil)
+	} else {
+		c.uploader = blob.NewUploader(ctx, blob.NewAzureUploadClient(uploadClient), c.downloader)
 	}
 
 	return nil
@@ -189,9 +138,6 @@ func (c *GitHubActionsCache) oldBlockCopy(ctx context.Context, downloadURL strin
 // so we use the sha256 of "gocica-cache-1.0" as a actionsCacheVersion.
 var actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053f746fae0287"
 
-var azureClientOptions = &blockblob.ClientOptions{
-	ClientOptions: azcore.ClientOptions{},
-}
 var (
 	errActionsCacheNotFound = errors.New("cache not found")
 	errAlreadyExists        = errors.New("cache already exists")
@@ -222,7 +168,7 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	case http.StatusConflict:
 		return errAlreadyExists
 	case http.StatusOK:
-		// continue to process response for successful request
+	// continue to process response for successful request
 	default:
 		sb := &strings.Builder{}
 		_, err := io.Copy(sb, res.Body)
@@ -313,200 +259,63 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 	return nil
 }
 
-func (c *GitHubActionsCache) createHeader(newMetaDataMap map[string]*v1.IndexEntry, newOutputBlockSizeMap map[string]int64) ([]byte, int64, error) {
-	outputMap := make(map[string]*v1.ActionsOutput, len(c.oldOutputMap)+len(c.newOutputBlockSizeMap))
-	for outputID, actionsOutput := range c.oldOutputMap {
-		outputMap[outputID] = actionsOutput
+func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
+	if c.downloader == nil {
+		return map[string]*v1.IndexEntry{}, nil
 	}
 
-	offset := c.baseOffset + c.oldOutputTotalSize
-	outputTotalSize := c.oldOutputTotalSize
-	for outputID, size := range newOutputBlockSizeMap {
-		outputMap[outputID] = &v1.ActionsOutput{
-			Offset: offset,
-		}
-		offset += size
-		outputTotalSize += size
-	}
-
-	protoBuf, err := proto.Marshal(&v1.ActionsCache{
-		Entries:         newMetaDataMap,
-		Outputs:         outputMap,
-		OutputTotalSize: outputTotalSize,
-	})
+	entries, err := c.downloader.GetEntries(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("marshal metadata: %w", err)
+		return nil, fmt.Errorf("get entries: %w", err)
 	}
 
-	buf := make([]byte, 8, 8+len(protoBuf))
-	binary.BigEndian.PutUint64(buf, uint64(len(protoBuf)))
-	buf = append(buf, protoBuf...)
-
-	return buf, outputTotalSize, nil
-}
-
-func (c *GitHubActionsCache) parseHeader(ctx context.Context) (map[string]*v1.IndexEntry, map[string]*v1.ActionsOutput, int64, int64, error) {
-	sizeBuf := make([]byte, 8)
-	if err := c.loadBuffer(ctx, sizeBuf, 0, 8); err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("load header size buffer: %w", err)
-	}
-	//nolint:gosec
-	protobufSize := int64(binary.BigEndian.Uint64(sizeBuf))
-
-	protoBuf := make([]byte, protobufSize)
-	if err := c.loadBuffer(ctx, protoBuf, 8, protobufSize); err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("load header buffer: %w", err)
-	}
-
-	var actionsCache v1.ActionsCache
-	if err := proto.Unmarshal(protoBuf, &actionsCache); err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("unmarshal: %w", err)
-	}
-
-	return actionsCache.Entries, actionsCache.Outputs, actionsCache.OutputTotalSize, 8 + protobufSize, nil
-}
-
-func (c *GitHubActionsCache) loadBuffer(ctx context.Context, buf []byte, offset, size int64) error {
-	if _, err := c.downloadClient.DownloadBuffer(ctx, buf, &blob.DownloadBufferOptions{
-		Range: blob.HTTPRange{Offset: offset, Count: size},
-	}); err != nil {
-		return fmt.Errorf("download stream: %w", err)
-	}
-
-	return nil
-}
-
-func (c *GitHubActionsCache) loadStream(ctx context.Context, w io.Writer, offset, size int64) error {
-	res, err := c.downloadClient.DownloadStream(ctx, &blob.DownloadStreamOptions{
-		Range: blob.HTTPRange{Offset: offset, Count: size},
-	})
-	if err != nil {
-		return fmt.Errorf("download stream: %w", err)
-	}
-	defer res.Body.Close()
-
-	if _, err := io.Copy(w, res.Body); err != nil {
-		return fmt.Errorf("copy: %w", err)
-	}
-
-	return nil
-}
-
-func (c *GitHubActionsCache) MetaData(context.Context) (map[string]*v1.IndexEntry, error) {
-	return c.oldMetadataMap, nil
+	return entries, nil
 }
 
 func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	if c.uploadClient == nil {
+	if c.uploader == nil {
 		return nil
 	}
 
 	key, _ := c.blobKey()
 
-	var newOutputBlockSizeMap map[string]int64
-	func() {
-		c.newOutputBlockSizeMapLocker.RLock()
-		defer c.newOutputBlockSizeMapLocker.RUnlock()
-		newOutputBlockSizeMap = c.newOutputBlockSizeMap
-	}()
-
-	header, outputTotalSize, err := c.createHeader(metaDataMap, newOutputBlockSizeMap)
+	size, err := c.uploader.Commit(ctx, metaDataMap)
 	if err != nil {
-		return fmt.Errorf("create header: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 
-	headerBlobID := c.generateBlockID()
-	_, err = c.uploadClient.StageBlock(
-		ctx,
-		headerBlobID,
-		myio.NopSeekCloser(bytes.NewReader(header)),
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("stage header block: %w", err)
-	}
-
-	if err := c.outputBlockCopyEg.Wait(); err != nil {
-		return fmt.Errorf("old block copy: %w", err)
-	}
-
-	blockIDs := make([]string, 0, len(newOutputBlockSizeMap)+1)
-	blockIDs = append(blockIDs, headerBlobID)
-	if c.copyOutputBlockID != "" {
-		blockIDs = append(blockIDs, c.copyOutputBlockID)
-	}
-	blockIDs = append(blockIDs, slices.Collect(maps.Keys(newOutputBlockSizeMap))...)
-
-	if _, err := c.uploadClient.CommitBlockList(ctx, blockIDs, nil); err != nil {
-		return fmt.Errorf("commit block list: %w", err)
-	}
-
-	c.logger.Debugf("commit block list done")
-
-	totalSize := int64(len(header)) + outputTotalSize
-	if err := c.commitCacheEntry(ctx, key, totalSize); err != nil {
+	if err := c.commitCacheEntry(ctx, key, size); err != nil {
 		return fmt.Errorf("commit cache entry: %w", err)
 	}
 
 	return nil
 }
 
-func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, size int64, w io.Writer) error {
-	if c.downloadClient == nil {
+func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, _ int64, w io.Writer) error {
+	if c.downloader == nil {
 		return nil
 	}
 
-	object, ok := c.oldOutputMap[objectID]
-	if !ok {
-		return nil
+	if err := c.downloader.DownloadOutputBlock(ctx, objectID, w); err != nil {
+		if errors.Is(err, blob.ErrOutputNotFound) {
+			return nil
+		}
+		return fmt.Errorf("download output block: %w", err)
 	}
-
-	offset := c.baseOffset + object.Offset
-
-	c.logger.Debugf("download: objectID=%s, offset=%d, size=%d", objectID, offset, size)
-
-	if err := c.loadStream(ctx, w, offset, size); err != nil {
-		return fmt.Errorf("load stream: %w", err)
-	}
-
-	c.logger.Debugf("download done: objectID=%s", objectID)
 
 	return nil
 }
 
 func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
-	if c.uploadClient == nil {
+	if c.uploader == nil {
 		return nil
 	}
 
-	c.logger.Debugf("upload: objectID=%s, size=%d", objectID, size)
-
-	_, err := c.uploadClient.StageBlock(
-		ctx,
-		objectID,
-		myio.NopSeekCloser(r),
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("stage block: %w", err)
+	if err := c.uploader.UploadOutput(ctx, objectID, size, myio.NopSeekCloser(r)); err != nil {
+		return fmt.Errorf("upload output: %w", err)
 	}
 
-	c.logger.Debugf("stage block done: objectID=%s", objectID)
-
-	c.newOutputBlockSizeMapLocker.Lock()
-	defer c.newOutputBlockSizeMapLocker.Unlock()
-	c.newOutputBlockSizeMap[objectID] = size
-
-	return err
-}
-
-func (c *GitHubActionsCache) generateBlockID() string {
-	var buf [32]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		c.logger.Errorf("failed to generate random bytes: %v", err)
-		return ""
-	}
-	return base64.StdEncoding.EncodeToString(buf[:])
+	return nil
 }
 
 func (c *GitHubActionsCache) blobKey() (string, []string) {

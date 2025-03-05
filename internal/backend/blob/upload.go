@@ -56,6 +56,12 @@ func (u *Uploader) getenarteBlockID() (string, error) {
 }
 
 func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvider) waitBaseFunc {
+	if baseBlobProvider == nil {
+		return func() (string, int64, map[string]*v1.ActionsOutput, error) {
+			return "", 0, map[string]*v1.ActionsOutput{}, nil
+		}
+	}
+
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var (
@@ -120,7 +126,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	return nil
 }
 
-func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput) ([]string, map[string]*v1.ActionsOutput) {
+func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput) ([]string, map[string]*v1.ActionsOutput, int64) {
 	var outputSizeMap map[string]int64
 	func() {
 		u.outputSizeMapLocker.RLock()
@@ -144,7 +150,7 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string
 		newOutputIDs = append(newOutputIDs, outputID)
 	}
 
-	return newOutputIDs, outputs
+	return newOutputIDs, outputs, offset
 }
 
 func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[string]*v1.ActionsOutput) ([]byte, error) {
@@ -165,34 +171,39 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[s
 	return buf, nil
 }
 
-func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) error {
+func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) (int64, error) {
 	baseBlockID, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
 	if err != nil {
-		return fmt.Errorf("wait base: %w", err)
+		return 0, fmt.Errorf("wait base: %w", err)
 	}
 
-	newOutputIDs, outputs := u.constructOutputs(baseOutputSize, baseOutputs)
+	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
 
 	headerBuf, err := u.createHeader(entries, outputs)
 	if err != nil {
-		return fmt.Errorf("create header: %w", err)
+		return 0, fmt.Errorf("create header: %w", err)
 	}
 
 	headerBlockID, err := u.getenarteBlockID()
 	if err != nil {
-		return fmt.Errorf("generate header block ID: %w", err)
+		return 0, fmt.Errorf("generate header block ID: %w", err)
 	}
 
 	_, err = u.client.UploadBlock(ctx, headerBlockID, myio.NopSeekCloser(bytes.NewReader(headerBuf)))
 	if err != nil {
-		return fmt.Errorf("upload header: %w", err)
+		return 0, fmt.Errorf("upload header: %w", err)
 	}
 
-	blockIDs := append([]string{headerBlockID, baseBlockID}, newOutputIDs...)
+	blockIDs := make([]string, 0, len(newOutputIDs)+2)
+	blockIDs = append(blockIDs, headerBlockID)
+	if baseBlockID != "" {
+		blockIDs = append(blockIDs, baseBlockID)
+	}
+	blockIDs = append(blockIDs, newOutputIDs...)
 	err = u.client.Commit(ctx, blockIDs)
 	if err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return 0, fmt.Errorf("commit: %w", err)
 	}
 
-	return nil
+	return 8 + int64(len(headerBuf)) + outputSize, nil
 }

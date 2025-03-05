@@ -198,12 +198,21 @@ func TestNewUploader(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		mockSetup   func(*mockUploadClient, *mockBaseBlobProvider)
-		expectError bool
+		name             string
+		mockSetup        func(*mockUploadClient, *mockBaseBlobProvider)
+		expectError      bool
+		checkBaseFunc    bool
+		wantBlockIDEmpty bool
+		wantSize         int64
 	}{
 		{
-			name: "success",
+			name:             "success without base provider",
+			mockSetup:        func(*mockUploadClient, *mockBaseBlobProvider) {},
+			wantBlockIDEmpty: true,
+			wantSize:         0,
+		},
+		{
+			name: "success with base provider",
 			mockSetup: func(client *mockUploadClient, provider *mockBaseBlobProvider) {
 				offset := int64(100)
 				size := int64(200)
@@ -211,6 +220,9 @@ func TestNewUploader(t *testing.T) {
 				provider.expectDownloadOutputs(map[string]*v1.ActionsOutput{}, nil)
 				client.expectUploadBlockFromURL(offset, size, nil)
 			},
+			checkBaseFunc:    true,
+			wantBlockIDEmpty: false,
+			wantSize:         200,
 		},
 		{
 			name: "GetOutputBlockURL error",
@@ -218,7 +230,9 @@ func TestNewUploader(t *testing.T) {
 				provider.expectGetOutputBlockURL("", 0, 0, errors.New("get url error"))
 				provider.expectDownloadOutputs(map[string]*v1.ActionsOutput{}, nil)
 			},
-			expectError: true,
+			checkBaseFunc: true,
+			expectError:   true,
+			wantSize:      0,
 		},
 		{
 			name: "DownloadOutputs error",
@@ -226,7 +240,9 @@ func TestNewUploader(t *testing.T) {
 				provider.expectGetOutputBlockURL("test-url", 100, 200, nil)
 				provider.expectDownloadOutputs(nil, errors.New("download error"))
 			},
-			expectError: true,
+			checkBaseFunc: true,
+			expectError:   true,
+			wantSize:      0,
 		},
 		{
 			name: "UploadBlockFromURL error",
@@ -237,12 +253,12 @@ func TestNewUploader(t *testing.T) {
 				provider.expectDownloadOutputs(map[string]*v1.ActionsOutput{}, nil)
 				client.expectUploadBlockFromURL(offset, size, errors.New("upload error"))
 			},
-			expectError: true,
+			checkBaseFunc: true,
+			expectError:   true,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -250,18 +266,37 @@ func TestNewUploader(t *testing.T) {
 			provider := &mockBaseBlobProvider{}
 			tt.mockSetup(client, provider)
 
-			uploader := NewUploader(t.Context(), client, provider)
+			var baseProvider BaseBlobProvider
+			if tt.checkBaseFunc {
+				baseProvider = provider
+			}
+
+			uploader := NewUploader(t.Context(), client, baseProvider)
 			if uploader == nil {
 				t.Fatal("uploader is nil")
 			}
 
-			_, _, _, err := uploader.waitBaseFunc()
+			blockID, size, outputs, err := uploader.waitBaseFunc()
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
-			} else if err != nil {
+				return
+			}
+
+			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if tt.wantBlockIDEmpty && blockID != "" {
+				t.Errorf("blockID should be empty, got %s", blockID)
+			}
+			if diff := cmp.Diff(tt.wantSize, size); diff != "" {
+				t.Errorf("size mismatch (-want +got):\n%s", diff)
+			}
+			if !tt.checkBaseFunc && len(outputs) != 0 {
+				t.Error("outputs should be empty for nil base provider")
 			}
 		})
 	}
@@ -429,13 +464,15 @@ func TestUploader_Commit(t *testing.T) {
 			provider := &mockBaseBlobProvider{}
 			uploader := tt.setupUploader(t.Context(), client, provider)
 
-			err := uploader.Commit(t.Context(), tt.entries)
+			_, err := uploader.Commit(t.Context(), tt.entries)
 
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
 				}
-			} else if err != nil {
+				return
+			}
+			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
 
