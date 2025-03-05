@@ -157,10 +157,11 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string
 	return newOutputIDs, outputs, offset
 }
 
-func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[string]*v1.ActionsOutput) ([]byte, error) {
+func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[string]*v1.ActionsOutput, outputSize int64) ([]byte, error) {
 	actionsCache := &v1.ActionsCache{
-		Entries: entries,
-		Outputs: outputs,
+		Entries:         entries,
+		Outputs:         outputs,
+		OutputTotalSize: outputSize,
 	}
 
 	protobufBuf, err := proto.Marshal(actionsCache)
@@ -183,7 +184,7 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 
 	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
 
-	headerBuf, err := u.createHeader(entries, outputs)
+	headerBuf, err := u.createHeader(entries, outputs, outputSize)
 	if err != nil {
 		return 0, fmt.Errorf("create header: %w", err)
 	}

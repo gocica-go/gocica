@@ -492,6 +492,7 @@ func TestUploader_createHeader(t *testing.T) {
 		name           string
 		entries        map[string]*v1.IndexEntry
 		outputs        map[string]*v1.ActionsOutput
+		outputSize     int64
 		expectError    bool
 		validateHeader func(*testing.T, []byte)
 	}{
@@ -511,6 +512,7 @@ func TestUploader_createHeader(t *testing.T) {
 					Size:   100,
 				},
 			},
+			outputSize: 100,
 			validateHeader: func(t *testing.T, headerBytes []byte) {
 				if len(headerBytes) <= 8 {
 					t.Error("header is too short")
@@ -539,6 +541,9 @@ func TestUploader_createHeader(t *testing.T) {
 				if diff := cmp.Diff(int64(100), header.Outputs["test"].Size); diff != "" {
 					t.Errorf("output Size mismatch (-want +got):\n%s", diff)
 				}
+				if diff := cmp.Diff(int64(100), header.OutputTotalSize); diff != "" {
+					t.Errorf("output total size mismatch (-want +got):\n%s", diff)
+				}
 			},
 		},
 	}
@@ -550,7 +555,7 @@ func TestUploader_createHeader(t *testing.T) {
 
 			uploader := &Uploader{}
 
-			header, err := uploader.createHeader(tt.entries, tt.outputs)
+			header, err := uploader.createHeader(tt.entries, tt.outputs, tt.outputSize)
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
