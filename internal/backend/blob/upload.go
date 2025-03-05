@@ -50,7 +50,7 @@ func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, ba
 	return uploader
 }
 
-func (u *Uploader) getenarteBlockID() (string, error) {
+func (u *Uploader) generateBlockID() (string, error) {
 	var buf [32]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		return "", fmt.Errorf("read random: %w", err)
@@ -73,7 +73,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 	)
 	eg.Go(func() error {
 		var err error
-		baseBlockID, err = u.getenarteBlockID()
+		baseBlockID, err = u.generateBlockID()
 		if err != nil {
 			return fmt.Errorf("generate block ID: %w", err)
 		}
@@ -157,10 +157,11 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string
 	return newOutputIDs, outputs, offset
 }
 
-func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[string]*v1.ActionsOutput) ([]byte, error) {
+func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[string]*v1.ActionsOutput, outputSize int64) ([]byte, error) {
 	actionsCache := &v1.ActionsCache{
-		Entries: entries,
-		Outputs: outputs,
+		Entries:         entries,
+		Outputs:         outputs,
+		OutputTotalSize: outputSize,
 	}
 
 	protobufBuf, err := proto.Marshal(actionsCache)
@@ -183,12 +184,12 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 
 	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
 
-	headerBuf, err := u.createHeader(entries, outputs)
+	headerBuf, err := u.createHeader(entries, outputs, outputSize)
 	if err != nil {
 		return 0, fmt.Errorf("create header: %w", err)
 	}
 
-	headerBlockID, err := u.getenarteBlockID()
+	headerBlockID, err := u.generateBlockID()
 	if err != nil {
 		return 0, fmt.Errorf("generate header block ID: %w", err)
 	}
