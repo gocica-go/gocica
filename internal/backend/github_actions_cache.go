@@ -150,6 +150,8 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 		return fmt.Errorf("encode request body: %w", err)
 	}
 
+	c.logger.Debugf("do request: endpoint=%s, body=%s", endpoint, buf.String())
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.JoinPath(endpoint).String(), buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -162,21 +164,21 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	}
 	defer res.Body.Close()
 
-	switch res.StatusCode {
-	case http.StatusNotFound:
-		return errActionsCacheNotFound
-	case http.StatusConflict:
-		return errAlreadyExists
-	case http.StatusOK:
-	// continue to process response for successful request
-	default:
+	if res.StatusCode != http.StatusOK {
 		sb := &strings.Builder{}
 		_, err := io.Copy(sb, res.Body)
 		if err != nil {
 			return fmt.Errorf("copy response body: %w", err)
 		}
 
-		return fmt.Errorf("unexpected status code: %d, body: %s", res.StatusCode, sb.String())
+		switch res.StatusCode {
+		case http.StatusNotFound:
+			return fmt.Errorf("%w: %s", errActionsCacheNotFound, sb.String())
+		case http.StatusConflict:
+			return fmt.Errorf("%w: %s", errAlreadyExists, sb.String())
+		default:
+			return fmt.Errorf("unexpected status code: %d, body: %s", res.StatusCode, sb.String())
+		}
 	}
 
 	if err := json.NewDecoder(res.Body).Decode(respBody); err != nil {
