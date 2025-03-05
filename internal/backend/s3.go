@@ -98,11 +98,19 @@ func (s *S3) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
 	return indexEntryMap.Entries, nil
 }
 
-func (s *S3) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
+func (s *S3) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
+	indexEntryMap := &v1.IndexEntryMap{
+		Entries: metaDataMap,
+	}
+	buf, err := proto.Marshal(indexEntryMap)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
 	opts := minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
 	}
-	_, err := s.client.PutObject(ctx, s.bucket, s3MetadataObjectName, bytes.NewReader(metaDataMapBuf), int64(len(metaDataMapBuf)), opts)
+	_, err = s.client.PutObject(ctx, s.bucket, s3MetadataObjectName, bytes.NewReader(buf), int64(len(buf)), opts)
 	if err != nil {
 		return fmt.Errorf("put metadata object: %w", err)
 	}
@@ -110,7 +118,7 @@ func (s *S3) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
 	return nil
 }
 
-func (s *S3) Get(ctx context.Context, outputID string, w io.Writer) error {
+func (s *S3) Get(ctx context.Context, outputID string, _ int64, w io.Writer) error {
 	opts := minio.GetObjectOptions{}
 	obj, err := s.client.GetObject(ctx, s.bucket, s.objectName(outputID), opts)
 	if err != nil {
@@ -126,7 +134,7 @@ func (s *S3) Get(ctx context.Context, outputID string, w io.Writer) error {
 	return nil
 }
 
-func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.Reader) error {
+func (s *S3) Put(ctx context.Context, outputID string, size int64, r io.ReadSeeker) error {
 	opts := minio.PutObjectOptions{
 		ContentType: "application/octet-stream",
 	}
@@ -142,6 +150,6 @@ func (s *S3) objectName(outputID string) string {
 	return fmt.Sprintf("o-%s", encodeID(outputID))
 }
 
-func (s *S3) Close() error {
+func (s *S3) Close(context.Context) error {
 	return nil
 }

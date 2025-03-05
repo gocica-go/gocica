@@ -8,23 +8,30 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/mazrean/gocica/internal/backend/blob"
+	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
-	"google.golang.org/protobuf/proto"
 )
 
 var _ RemoteBackend = &GitHubActionsCache{}
 
 type GitHubActionsCache struct {
-	logger             log.Logger
-	githubClient       *http.Client
-	baseURL            *url.URL
+	logger log.Logger
+
+	baseURL      *url.URL
+	githubClient *http.Client
+
+	uploader   *blob.Uploader
+	downloader *blob.Downloader
+
 	runnerOS, ref, sha string
 }
 
@@ -44,33 +51,93 @@ func NewGitHubActionsCache(
 		AccessToken: token,
 	}))
 
-	logger.Infof("GitHub Actions cache backend initialized.")
-
-	return &GitHubActionsCache{
+	c := &GitHubActionsCache{
 		logger:       logger,
 		githubClient: githubClient,
 		baseURL:      baseURL,
 		runnerOS:     runnerOS,
 		ref:          ref,
 		sha:          sha,
-	}, nil
+	}
+
+	downloadURL, err := c.setupDownloader(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("setup downloader: %w", err)
+	}
+
+	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
+		return nil, fmt.Errorf("setup uploader: %w", err)
+	}
+
+	logger.Infof("GitHub Actions cache backend initialized.")
+
+	return c, nil
 }
 
 const (
-	actionsCacheBasePath       = "/twirp/github.actions.results.api.v1.CacheService/"
-	actionsCacheMetadataPrefix = "gocica-r-metadata"
-	actionCacheObjectPrefix    = "gocica-o"
-	actionsCacheSeparator      = "-"
+	actionsCacheBasePath  = "/twirp/github.actions.results.api.v1.CacheService/"
+	actionsCachePrefix    = "gocica-cache"
+	actionsCacheSeparator = "-"
 )
+
+func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error) {
+	blobKey, restoreKeys := c.blobKey()
+
+	downloadURL, err := c.getDownloadURL(context.Background(), blobKey, restoreKeys)
+	if err != nil {
+		c.logger.Debugf("get download url: %v", err)
+		c.logger.Infof("cache not found, creating new cache entry")
+		return "", nil
+	}
+
+	downloadClient, err := blockblob.NewClientWithNoCredential(downloadURL, &blockblob.ClientOptions{
+		ClientOptions: azcore.ClientOptions{},
+	})
+	if err != nil {
+		return "", fmt.Errorf("create download client: %w", err)
+	}
+
+	c.downloader, err = blob.NewDownloader(ctx, blob.NewAzureDownloadClient(downloadClient))
+	if err != nil {
+		return "", fmt.Errorf("create downloader: %w", err)
+	}
+
+	return downloadURL, nil
+}
+
+func (c *GitHubActionsCache) setupUploader(ctx context.Context, downloadURL string) error {
+	blobKey, _ := c.blobKey()
+
+	uploadURL, err := c.createCacheEntry(ctx, blobKey)
+	if err != nil {
+		if errors.Is(err, errAlreadyExists) {
+			c.logger.Infof("cache already exists, skipping upload")
+			return nil
+		}
+		return fmt.Errorf("create cache entry: %w", err)
+	}
+
+	uploadClient, err := blockblob.NewClientWithNoCredential(uploadURL, &blockblob.ClientOptions{
+		ClientOptions: azcore.ClientOptions{},
+	})
+	if err != nil {
+		return fmt.Errorf("create upload client: %w", err)
+	}
+
+	if downloadURL == "" {
+		c.uploader = blob.NewUploader(ctx, blob.NewAzureUploadClient(uploadClient), nil)
+	} else {
+		c.uploader = blob.NewUploader(ctx, blob.NewAzureUploadClient(uploadClient), c.downloader)
+	}
+
+	return nil
+}
 
 // actionsCacheVersion is sha256 of the context.
 // upstream uses paths in actionsCacheVersion, we don't seem to have anything that is unique like this.
 // so we use the sha256 of "gocica-cache-1.0" as a actionsCacheVersion.
 var actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053f746fae0287"
 
-var azureClientOptions = &blockblob.ClientOptions{
-	ClientOptions: azcore.ClientOptions{},
-}
 var (
 	errActionsCacheNotFound = errors.New("cache not found")
 	errAlreadyExists        = errors.New("cache already exists")
@@ -101,7 +168,7 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	case http.StatusConflict:
 		return errAlreadyExists
 	case http.StatusOK:
-		// continue to process response for successful request
+	// continue to process response for successful request
 	default:
 		sb := &strings.Builder{}
 		_, err := io.Copy(sb, res.Body)
@@ -119,10 +186,10 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	return nil
 }
 
-func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreKeys []string) (io.ReadCloser, error) {
-	c.logger.Debugf("load cache: key=%s, restoreKeys=%v", key, restoreKeys)
+func (c *GitHubActionsCache) getDownloadURL(ctx context.Context, key string, restoreKeys []string) (string, error) {
+	c.logger.Debugf("get download url: key=%s, restoreKeys=%v", key, restoreKeys)
 
-	var loadResp struct {
+	var res struct {
 		OK                bool   `json:"ok"`
 		SignedDownloadURL string `json:"signed_download_url"`
 		MatchedKey        string `json:"matched_key"`
@@ -131,161 +198,139 @@ func (c *GitHubActionsCache) loadCache(ctx context.Context, key string, restoreK
 		Key         string   `json:"key"`
 		RestoreKeys []string `json:"restore_keys"`
 		Version     string   `json:"version"`
-	}{key, restoreKeys, actionsCacheVersion}, &loadResp)
+	}{key, restoreKeys, actionsCacheVersion}, &res)
 	if err != nil {
-		return nil, fmt.Errorf("get cache entry download url: %w", err)
+		return "", fmt.Errorf("get cache entry download url: %w", err)
 	}
 
-	if !loadResp.OK {
-		return nil, errors.New("cache not found")
+	if !res.OK {
+		return "", errors.New("failed to get download url")
 	}
 
-	c.logger.Debugf("signed download url: %s", loadResp.SignedDownloadURL)
+	c.logger.Debugf("signed download url: %s", res.SignedDownloadURL)
 
-	client, err := blockblob.NewClientWithNoCredential(loadResp.SignedDownloadURL, azureClientOptions)
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	res, err := client.DownloadStream(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("download stream: %w", err)
-	}
-
-	c.logger.Debugf("download done")
-
-	return res.Body, nil
+	return res.SignedDownloadURL, nil
 }
 
-func (c *GitHubActionsCache) storeCache(ctx context.Context, key string, size int64, r io.Reader) error {
-	c.logger.Debugf("store cache: key=%s, size=%d", key, size)
-	var reserveRes struct {
+func (c *GitHubActionsCache) createCacheEntry(ctx context.Context, key string) (string, error) {
+	c.logger.Debugf("create cache entry: key=%s", key)
+	var res struct {
 		OK              bool   `json:"ok"`
 		SignedUploadURL string `json:"signed_upload_url"`
 	}
 	err := c.doRequest(ctx, "CreateCacheEntry", &struct {
 		Key     string `json:"key"`
 		Version string `json:"version"`
-	}{key, actionsCacheVersion}, &reserveRes)
+	}{key, actionsCacheVersion}, &res)
 	if err != nil {
-		return err
+		return "", fmt.Errorf("http request: %w", err)
 	}
 
-	if !reserveRes.OK {
-		return errors.New("failed to reserve cache")
-	}
-	c.logger.Debugf("signed upload url: %s", reserveRes.SignedUploadURL)
-
-	client, err := blockblob.NewClientWithNoCredential(reserveRes.SignedUploadURL, azureClientOptions)
-	if err != nil {
-		return fmt.Errorf("create client: %w", err)
+	if !res.OK {
+		return "", errors.New("failed to create cache")
 	}
 
-	if _, err := client.UploadStream(ctx, r, nil); err != nil {
-		return fmt.Errorf("upload stream: %w", err)
-	}
+	c.logger.Debugf("signed upload url: %s", res.SignedUploadURL)
 
-	c.logger.Debugf("upload done")
+	return res.SignedUploadURL, nil
+}
 
-	var commitRes struct {
+func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, size int64) error {
+	c.logger.Debugf("commit cache entry: key=%s, size=%d", key, size)
+	var res struct {
 		OK      bool   `json:"ok"`
 		EntryID string `json:"entry_id"`
 	}
-	if err := c.doRequest(ctx, "FinalizeCacheEntryUpload", &struct {
+	err := c.doRequest(ctx, "FinalizeCacheEntryUpload", &struct {
 		Key       string `json:"key"`
 		SizeBytes int64  `json:"size_bytes"`
 		Version   string `json:"version"`
-	}{key, size, actionsCacheVersion}, &commitRes); err != nil {
-		return err
+	}{key, size, actionsCacheVersion}, &res)
+	if err != nil {
+		return fmt.Errorf("http request: %w", err)
 	}
 
-	if !commitRes.OK {
+	if !res.OK {
 		return errors.New("failed to commit cache")
 	}
 
-	c.logger.Debugf("commit done")
+	c.logger.Debugf("commit done: key=%s", key)
 
 	return nil
 }
 
 func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
-	key, restoreKeys := c.metadataBlobKey()
-	res, err := c.loadCache(ctx, key, restoreKeys)
+	if c.downloader == nil {
+		return map[string]*v1.IndexEntry{}, nil
+	}
+
+	entries, err := c.downloader.GetEntries(ctx)
 	if err != nil {
-		if errors.Is(err, errActionsCacheNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("load cache: %w", err)
-	}
-	defer res.Close()
-
-	metaDataBuf, err := io.ReadAll(res)
-	if err != nil {
-		return nil, fmt.Errorf("read all: %w", err)
+		return nil, fmt.Errorf("get entries: %w", err)
 	}
 
-	var indexEntryMap v1.IndexEntryMap
-	if err := proto.Unmarshal(metaDataBuf, &indexEntryMap); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
-	}
-
-	return indexEntryMap.Entries, nil
+	return entries, nil
 }
 
-func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMapBuf []byte) error {
-	key, _ := c.metadataBlobKey()
-	return c.storeCache(ctx, key, int64(len(metaDataMapBuf)), bytes.NewReader(metaDataMapBuf))
-}
-
-func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, w io.Writer) error {
-	key, restoreKeys := c.objectBlobKey(objectID)
-	res, err := c.loadCache(ctx, key, restoreKeys)
-	if err != nil {
-		if errors.Is(err, errActionsCacheNotFound) {
-			return nil
-		}
-		return fmt.Errorf("load cache: %w", err)
+func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
+	if c.uploader == nil {
+		return nil
 	}
-	defer res.Close()
 
-	_, err = io.Copy(w, res)
+	key, _ := c.blobKey()
+
+	size, err := c.uploader.Commit(ctx, metaDataMap)
 	if err != nil {
-		return fmt.Errorf("copy: %w", err)
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	if err := c.commitCacheEntry(ctx, key, size); err != nil {
+		return fmt.Errorf("commit cache entry: %w", err)
 	}
 
 	return nil
 }
 
-func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.Reader) error {
-	key, _ := c.objectBlobKey(objectID)
-	err := c.storeCache(ctx, key, size, r)
-	if errors.Is(err, errAlreadyExists) {
+func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, _ int64, w io.Writer) error {
+	if c.downloader == nil {
 		return nil
 	}
 
-	return err
+	if err := c.downloader.DownloadOutputBlock(ctx, objectID, w); err != nil {
+		if errors.Is(err, blob.ErrOutputNotFound) {
+			return nil
+		}
+		return fmt.Errorf("download output block: %w", err)
+	}
+
+	return nil
 }
 
-func (c *GitHubActionsCache) metadataBlobKey() (string, []string) {
-	return c.blobKey(actionsCacheMetadataPrefix)
+func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
+	if c.uploader == nil {
+		return nil
+	}
+
+	if err := c.uploader.UploadOutput(ctx, objectID, size, myio.NopSeekCloser(r)); err != nil {
+		return fmt.Errorf("upload output: %w", err)
+	}
+
+	return nil
 }
 
-func (c *GitHubActionsCache) objectBlobKey(objectID string) (string, []string) {
-	return c.blobKey(actionCacheObjectPrefix + actionsCacheSeparator + objectID)
-}
-
-func (c *GitHubActionsCache) blobKey(baseKey string) (string, []string) {
-	baseKey += actionsCacheSeparator + c.runnerOS
+func (c *GitHubActionsCache) blobKey() (string, []string) {
+	baseKey := actionsCachePrefix + actionsCacheSeparator + c.runnerOS
 	restoreKeys := make([]string, 0, 2)
 	for _, k := range []string{c.ref, c.sha} {
 		baseKey += actionsCacheSeparator
 		restoreKeys = append(restoreKeys, baseKey)
 		baseKey += k
 	}
+	slices.Reverse(restoreKeys)
 
 	return baseKey, restoreKeys
 }
 
-func (c *GitHubActionsCache) Close() error {
+func (c *GitHubActionsCache) Close(context.Context) error {
 	return nil
 }

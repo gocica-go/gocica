@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	myio "github.com/mazrean/gocica/internal/pkg/io"
 )
 
 func TestProcess_knownCommands(t *testing.T) {
@@ -48,7 +48,7 @@ func TestProcess_knownCommands(t *testing.T) {
 		{
 			name: "close handler only",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -63,7 +63,7 @@ func TestProcess_knownCommands(t *testing.T) {
 				WithPutHandler(func(context.Context, *Request, *Response) error {
 					return nil
 				}),
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -142,7 +142,7 @@ func TestProcess_handle(t *testing.T) {
 		{
 			name: "successful close handler",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -169,7 +169,7 @@ func TestProcess_handle(t *testing.T) {
 					return nil
 				}))
 			case "close":
-				options = append(options, WithCloseHandler(func() error {
+				options = append(options, WithCloseHandler(func(context.Context) error {
 					called = "close"
 					return nil
 				}))
@@ -214,7 +214,7 @@ func TestProcess_close(t *testing.T) {
 		{
 			name: "with close handler",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return nil
 				}),
 			},
@@ -224,7 +224,7 @@ func TestProcess_close(t *testing.T) {
 		{
 			name: "with error in close handler",
 			options: []ProcessOption{
-				WithCloseHandler(func() error {
+				WithCloseHandler(func(context.Context) error {
 					return fmt.Errorf("close error")
 				}),
 			},
@@ -238,7 +238,7 @@ func TestProcess_close(t *testing.T) {
 			called := false
 			if tt.wantCall {
 				tt.options = []ProcessOption{
-					WithCloseHandler(func() error {
+					WithCloseHandler(func(context.Context) error {
 						called = true
 						if tt.wantErr {
 							return fmt.Errorf("close error")
@@ -249,7 +249,7 @@ func TestProcess_close(t *testing.T) {
 			}
 
 			p := NewProcess(tt.options...)
-			err := p.close()
+			err := p.close(t.Context())
 
 			if tt.wantErr {
 				if err == nil {
@@ -307,7 +307,7 @@ func TestProcess_decodeWorker(t *testing.T) {
 			ActionID: "000a7673899170f3adcac947cabf348c041d32330bb3f6ac6f551128c0c7efa2",
 			OutputID: "04464d0c070ce0c1954c4d7846890a40597b70c10f9e7c542c30e6a2659abce4",
 		}
-		putBody     = strings.NewReader("gocica")
+		putBody     = myio.NewClonableReadSeeker([]byte("gocica"))
 		putReqValue = &Request{
 			ID:       2,
 			Command:  CmdPut,

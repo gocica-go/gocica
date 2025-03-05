@@ -83,8 +83,16 @@ func (d *Disk) MetaData(context.Context) (map[string]*v1.IndexEntry, error) {
 	return indexEntryMap.Entries, nil
 }
 
-func (d *Disk) WriteMetaData(_ context.Context, metaDataMapBuf []byte) error {
-	err := os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), metaDataMapBuf, 0600)
+func (d *Disk) WriteMetaData(_ context.Context, metaDataMap map[string]*v1.IndexEntry) error {
+	indexEntryMap := &v1.IndexEntryMap{
+		Entries: metaDataMap,
+	}
+	buf, err := proto.Marshal(indexEntryMap)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	err = os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), buf, 0600)
 	if err != nil {
 		return fmt.Errorf("write metadata file: %w", err)
 	}
@@ -180,6 +188,6 @@ func (d *Disk) objectFilePath(id string) string {
 	return filepath.Join(d.rootPath, fmt.Sprintf("o-%s", encodeID(id)))
 }
 
-func (d *Disk) Close() error {
+func (d *Disk) Close(context.Context) error {
 	return nil
 }

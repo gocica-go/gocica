@@ -57,9 +57,9 @@ func (g *Gocica) Put(ctx context.Context, req *protocol.Request, res *protocol.R
 	return nil
 }
 
-func (g *Gocica) Close() error {
+func (g *Gocica) Close(ctx context.Context) error {
 	g.logger.Infof("cache hit count: %d", atomic.LoadUint64(&g.hitCount))
 	g.logger.Infof("cache miss count: %d", atomic.LoadUint64(&g.missCount))
 	g.logger.Infof("cache put count: %d", atomic.LoadUint64(&g.putCount))
-	return g.backend.Close()
+	return g.backend.Close(ctx)
 }

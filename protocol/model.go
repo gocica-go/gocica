@@ -2,7 +2,9 @@
 // between processes implementing the cache interface.
 package protocol
 
-import "io"
+import (
+	"github.com/mazrean/gocica/internal/pkg/io"
+)
 
 // Cmd is a command that can be issued to a process.
 //
@@ -40,7 +42,7 @@ type Request struct {
 	// Body is the request payload for operations like "put".
 	// It's sent separately from the JSON object so large values
 	// can be streamed efficiently.
-	Body io.Reader `json:"-"`
+	Body io.ClonableReadSeeker `json:"-"`
 }
 
 // Response is the JSON response from the process.
