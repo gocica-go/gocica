@@ -125,9 +125,9 @@ func (c *GitHubActionsCache) setupUploader(ctx context.Context, downloadURL stri
 	}
 
 	if downloadURL == "" {
-		c.uploader = blob.NewUploader(ctx, blob.NewAzureUploadClient(uploadClient), nil)
+		c.uploader = blob.NewUploader(ctx, c.logger, blob.NewAzureUploadClient(uploadClient), nil)
 	} else {
-		c.uploader = blob.NewUploader(ctx, blob.NewAzureUploadClient(uploadClient), c.downloader)
+		c.uploader = blob.NewUploader(ctx, c.logger, blob.NewAzureUploadClient(uploadClient), c.downloader)
 	}
 
 	return nil

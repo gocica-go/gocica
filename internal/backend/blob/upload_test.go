@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/log"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -272,7 +273,7 @@ func TestNewUploader(t *testing.T) {
 				baseProvider = provider
 			}
 
-			uploader := NewUploader(t.Context(), client, baseProvider)
+			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider)
 			if uploader == nil {
 				t.Fatal("uploader is nil")
 			}
@@ -353,7 +354,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 			t.Parallel()
 
 			client := &mockUploadClient{}
-			uploader := NewUploader(t.Context(), client, &mockBaseBlobProvider{})
+			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{})
 
 			reader := tt.setupMock(client)
 			err := uploader.UploadOutput(t.Context(), tt.outputID, tt.size, reader)
@@ -402,7 +403,7 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
-				return NewUploader(ctx, client, provider)
+				return NewUploader(ctx, log.DefaultLogger, client, provider)
 			},
 		},
 		{
@@ -422,7 +423,7 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
 
-				uploader := NewUploader(ctx, client, provider)
+				uploader := NewUploader(ctx, log.DefaultLogger, client, provider)
 				uploader.outputSizeMap["new-output"] = 200
 				return uploader
 			},
@@ -450,7 +451,7 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(errors.New("commit error"))
-				return NewUploader(ctx, client, provider)
+				return NewUploader(ctx, log.DefaultLogger, client, provider)
 			},
 			expectError: true,
 		},
