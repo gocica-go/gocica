@@ -61,5 +61,10 @@ func (g *Gocica) Close(ctx context.Context) error {
 	g.logger.Infof("cache hit count: %d", atomic.LoadUint64(&g.hitCount))
 	g.logger.Infof("cache miss count: %d", atomic.LoadUint64(&g.missCount))
 	g.logger.Infof("cache put count: %d", atomic.LoadUint64(&g.putCount))
-	return g.backend.Close(ctx)
+
+	if err := g.backend.Close(ctx); err != nil {
+		g.logger.Warnf("failed to close backend: %v", err)
+	}
+
+	return nil
 }

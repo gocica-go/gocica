@@ -12,11 +12,13 @@ import (
 
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 )
 
 type Uploader struct {
+	logger              log.Logger
 	client              UploadClient
 	outputSizeMapLocker sync.RWMutex
 	outputSizeMap       map[string]int64
@@ -36,8 +38,9 @@ type BaseBlobProvider interface {
 
 type waitBaseFunc func() (baseBlockID string, baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput, err error)
 
-func NewUploader(ctx context.Context, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
+func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
 	uploader := &Uploader{
+		logger:        logger,
 		client:        client,
 		outputSizeMap: map[string]int64{},
 	}
@@ -104,6 +107,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 		if err := eg.Wait(); err != nil {
 			return "", 0, nil, err
 		}
+		u.logger.Debugf("base output size=%d", baseOutputSize)
 
 		return baseBlockID, baseOutputSize, baseOutputs, nil
 	}
@@ -205,5 +209,5 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 		return 0, fmt.Errorf("commit: %w", err)
 	}
 
-	return 8 + int64(len(headerBuf)) + outputSize, nil
+	return int64(len(headerBuf)) + outputSize, nil
 }
