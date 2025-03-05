@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"maps"
 	"testing"
 	"time"
 
@@ -397,7 +398,7 @@ func TestUploader_Commit(t *testing.T) {
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
 				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(baseOutputs, nil)
+				provider.expectDownloadOutputs(maps.Clone(baseOutputs), nil)
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
@@ -416,7 +417,7 @@ func TestUploader_Commit(t *testing.T) {
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
 				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(baseOutputs, nil)
+				provider.expectDownloadOutputs(maps.Clone(baseOutputs), nil)
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
@@ -445,7 +446,7 @@ func TestUploader_Commit(t *testing.T) {
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
 				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(baseOutputs, nil)
+				provider.expectDownloadOutputs(maps.Clone(baseOutputs), nil)
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(errors.New("commit error"))
