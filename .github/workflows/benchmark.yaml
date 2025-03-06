@@ -1,0 +1,155 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  no_cache_gocica_github:
+    name: GoCICa GitHub(No Cache)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: 1
+    steps:
+      - name: Clear cache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log("About to clear")
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              key: "gocica-cache-"
+            })
+            for (const cache of caches.data.actions_caches) {
+              console.log(cache)
+              github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id,
+              })
+            }
+            console.log("Clear completed")
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
+          cache: false
+      - uses: gocica-go/gocica-action@v0.1.0-alpha1
+      - run: go install std
+  cache_gocica_github:
+    name: GoCICa GitHub(Cache)
+    runs-on: ubuntu-latest
+    needs: [no_cache_gocica_github]
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: 1
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
+          cache: false
+      - uses: gocica-go/gocica-action@v0.1.0-alpha1
+      - run: go install std
+  no_cache_gocica_s3:
+    name: GoCICa GitHub(No Cache)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: 1
+    steps:
+      - name: Clear cache
+        run: aws s3 rm --recursive s3://${{ secrets.GOCICA_S3_BUCKET }}
+        env:
+          AWS_DEFAULT_REGION: ${{ secrets.GOCICA_S3_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
+          cache: false
+      - uses: gocica-go/gocica-action@v0.1.0-alpha1
+      - run: go install std
+  cache_gocica_s3:
+    name: GoCICa GitHub(Cache)
+    runs-on: ubuntu-latest
+    needs: [no_cache_gocica_s3]
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: 1
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
+          cache: false
+      - uses: gocica-go/gocica-action@v0.1.0-alpha1
+        with:
+          remote: s3
+          s3-bucket: ${{ secrets.GOCICA_S3_BUCKET }}
+          s3-region: ${{ secrets.GOCICA_S3_REGION }}
+          s3-access-key: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
+          s3-secret-access-key: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+      - run: go install std
+  no_cache_default:
+    name: action/cache(No Cache)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: 1
+    steps:
+      - name: Clear cache
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log("About to clear")
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              key: "go-build-"
+            })
+            for (const cache of caches.data.actions_caches) {
+              console.log(cache)
+              github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id,
+              })
+            }
+            console.log("Clear completed")
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/go/cache
+          key: go-build-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ github.ref }}-
+            go-build-${{ runner.os }}-
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
+          cache: false
+      - run: go install std
+  cache_default:
+    name: action/cache(Cache)
+    runs-on: ubuntu-latest
+    needs: [no_cache_default]
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: 1
+    steps:
+      - uses: actions/cache@v4
+        with:
+          path: /tmp/go/cache
+          key: go-build-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ github.ref }}-
+            go-build-${{ runner.os }}-
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
+          cache: false
+      - run: go install std
