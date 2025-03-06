@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataDog/zstd"
 	"github.com/google/go-cmp/cmp"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -311,38 +312,49 @@ func TestUploader_UploadOutput(t *testing.T) {
 		name        string
 		outputID    string
 		size        int64
-		setupMock   func(*mockUploadClient) io.ReadSeekCloser
+		setupMock   func(*mockUploadClient) (io.ReadSeekCloser, error)
 		expectError bool
 	}{
 		{
 			name:     "success",
 			outputID: "test-output",
 			size:     100,
-			setupMock: func(client *mockUploadClient) io.ReadSeekCloser {
-				data := bytes.NewReader(make([]byte, 100))
-				client.expectUploadBlock("test-output", 100, nil)
-				return myio.NopSeekCloser(data)
+			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
+				data := make([]byte, 100)
+				compressedData, err := zstd.Compress(nil, data)
+				if err != nil {
+					return nil, err
+				}
+				client.expectUploadBlock("test-output", int64(len(compressedData)), nil)
+				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
 		},
 		{
 			name:     "size mismatch",
 			outputID: "test-output",
 			size:     100,
-			setupMock: func(client *mockUploadClient) io.ReadSeekCloser {
-				data := bytes.NewReader(make([]byte, 50))
-				client.expectUploadBlock("test-output", 50, nil)
-				return myio.NopSeekCloser(data)
+			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
+				data := make([]byte, 50)
+				compressedData, err := zstd.Compress(nil, data)
+				if err != nil {
+					return nil, err
+				}
+				client.expectUploadBlock("test-output", int64(len(compressedData)), nil)
+				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
-			expectError: true,
 		},
 		{
 			name:     "upload error",
 			outputID: "test-output",
 			size:     100,
-			setupMock: func(client *mockUploadClient) io.ReadSeekCloser {
-				data := bytes.NewReader(make([]byte, 100))
-				client.expectUploadBlock("test-output", 0, errors.New("upload error"))
-				return myio.NopSeekCloser(data)
+			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
+				data := make([]byte, 100)
+				compressedData, err := zstd.Compress(nil, data)
+				if err != nil {
+					return nil, err
+				}
+				client.expectUploadBlock("test-output", int64(len(compressedData)), errors.New("upload error"))
+				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
 			expectError: true,
 		},
@@ -356,8 +368,11 @@ func TestUploader_UploadOutput(t *testing.T) {
 			client := &mockUploadClient{}
 			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{})
 
-			reader := tt.setupMock(client)
-			err := uploader.UploadOutput(t.Context(), tt.outputID, tt.size, reader)
+			reader, err := tt.setupMock(client)
+			if err != nil {
+				t.Fatalf("failed to setup mock: %v", err)
+			}
+			err = uploader.UploadOutput(t.Context(), tt.outputID, tt.size, reader)
 
 			if tt.expectError {
 				if err == nil {

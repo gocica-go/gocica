@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
@@ -113,19 +114,26 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 	}
 }
 
-func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64, r io.ReadSeekCloser) error {
-	n, err := u.client.UploadBlock(ctx, outputID, r)
+func (u *Uploader) UploadOutput(ctx context.Context, outputID string, _ int64, r io.ReadSeekCloser) error {
+	buf := bytes.NewBuffer(nil)
+	zw := zstd.NewWriterLevel(buf, 1)
+
+	if _, err := io.Copy(zw, r); err != nil {
+		return fmt.Errorf("compress data: %w", err)
+	}
+
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("close compressor: %w", err)
+	}
+
+	conpressedSize, err := u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(bytes.NewReader(buf.Bytes())))
 	if err != nil {
 		return fmt.Errorf("upload block: %w", err)
 	}
 
-	if n != size {
-		return fmt.Errorf("size mismatch: expected=%d, actual=%d", size, n)
-	}
-
 	u.outputSizeMapLocker.Lock()
 	defer u.outputSizeMapLocker.Unlock()
-	u.outputSizeMap[outputID] = size
+	u.outputSizeMap[outputID] = conpressedSize
 
 	return nil
 }
@@ -147,8 +155,9 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string
 		}
 
 		outputs[outputID] = &v1.ActionsOutput{
-			Offset: offset,
-			Size:   size,
+			Offset:      offset,
+			Size:        size,
+			Compression: v1.Compression_COMPRESSION_ZSTD,
 		}
 		offset += size
 		newOutputIDs = append(newOutputIDs, outputID)

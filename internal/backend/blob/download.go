@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/DataDog/zstd"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -89,8 +91,36 @@ func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w i
 	}
 
 	offset := d.headerSize + output.Offset
-	if err := d.client.DownloadBlock(ctx, offset, output.Size, w); err != nil {
-		return fmt.Errorf("download block: %w", err)
+	switch output.Compression {
+	case v1.Compression_COMPRESSION_ZSTD:
+		pr, pw := io.Pipe()
+		defer pr.Close()
+
+		eg := errgroup.Group{}
+		eg.Go(func() error {
+			defer pw.Close()
+			if err := d.client.DownloadBlock(ctx, offset, output.Size, pw); err != nil {
+				return fmt.Errorf("download block: %w", err)
+			}
+			return nil
+		})
+
+		zr := zstd.NewReader(pr)
+		defer zr.Close()
+
+		if _, err := io.Copy(w, zr); err != nil {
+			return fmt.Errorf("copy decompressed data: %w", err)
+		}
+
+		if err := eg.Wait(); err != nil {
+			return err
+		}
+	case v1.Compression_COMPRESSION_UNSPECIFIED:
+		if err := d.client.DownloadBlock(ctx, offset, output.Size, w); err != nil {
+			return fmt.Errorf("download block: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported compression: %v", output.Compression)
 	}
 
 	return nil
