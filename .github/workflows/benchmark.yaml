@@ -53,7 +53,7 @@ jobs:
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
       - run: go install std
   no_cache_gocica_s3:
-    name: GoCICa GitHub(No Cache)
+    name: GoCICa S3(No Cache)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -73,7 +73,7 @@ jobs:
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
       - run: go install std
   cache_gocica_s3:
-    name: GoCICa GitHub(Cache)
+    name: GoCICa S3(Cache)
     runs-on: ubuntu-latest
     needs: [no_cache_gocica_s3]
     strategy:
