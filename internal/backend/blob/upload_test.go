@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataDog/zstd"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
@@ -439,13 +440,21 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectCommit(nil)
 
 				uploader := NewUploader(ctx, log.DefaultLogger, client, provider)
-				uploader.outputSizeMap["new-output"] = 200
+				uploader.outputSizeMap["new-output"] = &v1.ActionsOutput{
+					Offset:      100,
+					Size:        150,
+					Compression: v1.Compression_COMPRESSION_ZSTD,
+				}
 				return uploader
 			},
 			validateState: func(t *testing.T, u *Uploader) {
 				u.outputSizeMapLocker.RLock()
 				defer u.outputSizeMapLocker.RUnlock()
-				if diff := cmp.Diff(int64(200), u.outputSizeMap["new-output"]); diff != "" {
+				if diff := cmp.Diff(&v1.ActionsOutput{
+					Offset:      100,
+					Size:        150,
+					Compression: v1.Compression_COMPRESSION_ZSTD,
+				}, u.outputSizeMap["new-output"], cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
 					t.Errorf("outputSizeMap mismatch (-want +got):\n%s", diff)
 				}
 			},
