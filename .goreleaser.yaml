@@ -3,12 +3,43 @@ before:
     - go mod download
 builds:
   - env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - >-
+          {{- if eq .Os "darwin" }}
+            {{- if eq .Arch "amd64"}}CC=zig c -target x86_64-macos-none -F{{ .Env.SDK_PATH }}/System/Library/Frameworks{{- end }}
+            {{- if eq .Arch "arm64"}}CC=zig c -target aarch64-macos-none -F{{ .Env.SDK_PATH }}/System/Library/Frameworks{{- end }}
+          {{- end }}
+      - >-
+          {{- if eq .Os "darwin" }}
+            {{- if eq .Arch "amd64"}}CC=zig c++ -target x86_64-macos-none -F{{ .Env.SDK_PATH }}/System/Library/Frameworks{{- end }}
+            {{- if eq .Arch "arm64"}}CC=zig c++ -target aarch64-macos-none -F{{ .Env.SDK_PATH }}/System/Library/Frameworks{{- end }}
+          {{- end }}
+      - >-
+          {{- if eq .Os "linux" }}
+            {{- if eq .Arch "amd64" }}CC=zig c -target x86_64-linux-musl{{- end }}
+            {{- if eq .Arch "arm64"}}CC=zig c -target aarch64-linux-musl{{- end }}
+          {{- end }}
+      - >-
+          {{- if eq .Os "linux" }}
+            {{- if eq .Arch "amd64" }}CC=zig c++ -target x86_64-linux-musl{{- end }}
+            {{- if eq .Arch "arm64"}}CC=zig c++ -target aarch64-linux-musl{{- end }}
+          {{- end }}
+      - >-
+          {{- if eq .Os "windows" }}
+            {{- if eq .Arch "amd64" }}CC=zig c -target x86_64-windows-gnu{{- end }}
+            {{- if eq .Arch "arm64"}}CC=zig c -target aarch64-windows-gnu{{- end }}
+          {{- end }}
+      - >-
+          {{- if eq .Os "windows" }}
+            {{- if eq .Arch "amd64" }}CC=zig c++ -target x86_64-windows-gnu{{- end }}
+            {{- if eq .Arch "arm64"}}CC=zig c++ -target aarch64-windows-gnu{{- end }}
+          {{- end }}
     flags:
       - -trimpath
     ldflags:
       - -s
       - -w
+      - -extldflags "-static"
       - -X main.version={{.Version}}
       - -X main.revision={{.ShortCommit}}
     goos:
