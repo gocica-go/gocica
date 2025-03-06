@@ -116,7 +116,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 
 func (u *Uploader) UploadOutput(ctx context.Context, outputID string, _ int64, r io.ReadSeekCloser) error {
 	buf := bytes.NewBuffer(nil)
-	zw := zstd.NewWriterLevel(buf, 5)
+	zw := zstd.NewWriterLevel(buf, 1)
 
 	if _, err := io.Copy(zw, r); err != nil {
 		return fmt.Errorf("compress data: %w", err)
