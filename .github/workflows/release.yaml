@@ -11,7 +11,7 @@ env:
 jobs:
   build:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
@@ -21,12 +21,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: mlugg/setup-zig@v1
+        with:
+          zig-version: 0.14.0
+      - name: Set output
+        id: macos_sdk
+        run: echo "path=$(xcrun --show-sdk-path)" >> $GITHUB_OUTPUT
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SDK_ROOT: ${{ steps.macos_sdk.outputs.path }}
       - name: Upload assets
         uses: actions/upload-artifact@v4
         with:

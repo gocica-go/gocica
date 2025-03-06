@@ -6,9 +6,15 @@ option go_package = "github.com/mazrean/gocica/proto/gocica/v1";
 
 import "gocica/v1/index_entry.proto";
 
+enum Compression {
+  COMPRESSION_UNSPECIFIED = 0;
+  COMPRESSION_ZSTD = 1;
+}
+
 message ActionsOutput {
   int64 offset = 1;
   int64 size = 2;
+  Compression compression = 3;
 }
 
 message ActionsCache {

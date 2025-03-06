@@ -10,6 +10,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
@@ -21,7 +22,7 @@ type Uploader struct {
 	logger              log.Logger
 	client              UploadClient
 	outputSizeMapLocker sync.RWMutex
-	outputSizeMap       map[string]int64
+	outputSizeMap       map[string]*v1.ActionsOutput
 	waitBaseFunc        waitBaseFunc
 }
 
@@ -42,7 +43,7 @@ func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, ba
 	uploader := &Uploader{
 		logger:        logger,
 		client:        client,
-		outputSizeMap: map[string]int64{},
+		outputSizeMap: map[string]*v1.ActionsOutput{},
 	}
 
 	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
@@ -114,24 +115,46 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 }
 
 func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64, r io.ReadSeekCloser) error {
-	n, err := u.client.UploadBlock(ctx, outputID, r)
+	var (
+		reader      io.ReadSeeker
+		compression v1.Compression
+	)
+	if size > 100*(2^10) {
+		buf := bytes.NewBuffer(nil)
+		zw := zstd.NewWriterLevel(buf, 1)
+
+		if _, err := io.Copy(zw, r); err != nil {
+			return fmt.Errorf("compress data: %w", err)
+		}
+
+		if err := zw.Close(); err != nil {
+			return fmt.Errorf("close compressor: %w", err)
+		}
+
+		reader = bytes.NewReader(buf.Bytes())
+		compression = v1.Compression_COMPRESSION_ZSTD
+	} else {
+		reader = r
+		compression = v1.Compression_COMPRESSION_UNSPECIFIED
+	}
+
+	size, err := u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(reader))
 	if err != nil {
 		return fmt.Errorf("upload block: %w", err)
 	}
 
-	if n != size {
-		return fmt.Errorf("size mismatch: expected=%d, actual=%d", size, n)
-	}
-
 	u.outputSizeMapLocker.Lock()
 	defer u.outputSizeMapLocker.Unlock()
-	u.outputSizeMap[outputID] = size
+	u.outputSizeMap[outputID] = &v1.ActionsOutput{
+		Size:        size,
+		Compression: compression,
+	}
 
 	return nil
 }
 
 func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput) ([]string, map[string]*v1.ActionsOutput, int64) {
-	var outputSizeMap map[string]int64
+	var outputSizeMap map[string]*v1.ActionsOutput
 	func() {
 		u.outputSizeMapLocker.RLock()
 		defer u.outputSizeMapLocker.RUnlock()
@@ -141,16 +164,14 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string
 	outputs := baseOutputs
 	offset := baseOutputSize
 	newOutputIDs := make([]string, 0, len(outputSizeMap))
-	for outputID, size := range outputSizeMap {
+	for outputID, output := range outputSizeMap {
 		if _, ok := baseOutputs[outputID]; ok {
 			continue
 		}
 
-		outputs[outputID] = &v1.ActionsOutput{
-			Offset: offset,
-			Size:   size,
-		}
-		offset += size
+		output.Offset = offset
+		outputs[outputID] = output
+		offset += output.Size
 		newOutputIDs = append(newOutputIDs, outputID)
 	}
 
