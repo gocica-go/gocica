@@ -3,6 +3,9 @@ name: Benchmark
 on:
   workflow_dispatch:
 
+permissions:
+  actions: write
+
 jobs:
   no_cache_gocica_github:
     name: GoCICa GitHub(No Cache)
