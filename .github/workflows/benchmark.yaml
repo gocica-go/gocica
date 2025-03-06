@@ -3,6 +3,9 @@ name: Benchmark
 on:
   workflow_dispatch:
 
+permissions:
+  actions: write
+
 jobs:
   no_cache_gocica_github:
     name: GoCICa GitHub(No Cache)
@@ -34,7 +37,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
       - run: go install std
   cache_gocica_github:
@@ -49,7 +51,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
       - run: go install std
   no_cache_gocica_s3:
@@ -69,7 +70,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
       - run: go install std
   cache_gocica_s3:
@@ -84,7 +84,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
         with:
           remote: s3
@@ -100,6 +99,8 @@ jobs:
       matrix:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
+    env:
+      GOCACHE: /tmp/go/cache
     steps:
       - name: Clear cache
         uses: actions/github-script@v6
@@ -130,7 +131,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false
       - run: go install std
   cache_default:
     name: action/cache(Cache)
@@ -140,7 +140,12 @@ jobs:
       matrix:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
+    env:
+      GOCACHE: /tmp/go/cache
     steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
       - uses: actions/cache@v4
         with:
           path: /tmp/go/cache
@@ -148,8 +153,4 @@ jobs:
           restore-keys: |
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.1
-          cache: false
       - run: go install std
