@@ -131,8 +131,6 @@ jobs:
       matrix:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
-    env:
-      GOCACHE: /tmp/go/cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,15 +142,11 @@ jobs:
         with:
           script: |
             console.log("About to clear")
-            const caches = [await github.rest.actions.getActionsCacheList({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              key: "go-build-"
-            }), await github.rest.actions.getActionsCacheList({
+            const caches = await github.rest.actions.getActionsCacheList({
               owner: context.repo.owner,
               repo: context.repo.repo,
               key: "setup-go-"
-            })].flat()
+            })
             for (const cache of caches.data.actions_caches) {
               console.log(cache)
               github.rest.actions.deleteActionsCacheById({
@@ -162,13 +156,6 @@ jobs:
               })
             }
             console.log("Clear completed")
-      - uses: actions/cache@v4
-        with:
-          path: /tmp/go/cache
-          key: go-build-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-build-${{ runner.os }}-${{ github.ref }}-
-            go-build-${{ runner.os }}-
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
@@ -184,8 +171,6 @@ jobs:
       matrix:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
-    env:
-      GOCACHE: /tmp/go/cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -195,13 +180,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-      - uses: actions/cache@v4
-        with:
-          path: /tmp/go/cache
-          key: go-build-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-build-${{ runner.os }}-${{ github.ref }}-
-            go-build-${{ runner.os }}-
       - run: go mod download
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
