@@ -34,11 +34,19 @@ jobs:
               })
             }
             console.log("Clear completed")
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
-      - run: time go install std
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
   cache_gocica_github:
     name: GoCICa GitHub(Cache)
     runs-on: ubuntu-latest
@@ -48,11 +56,19 @@ jobs:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
     steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
-      - run: time go install std
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
   no_cache_gocica_s3:
     name: GoCICa S3(No Cache)
     runs-on: ubuntu-latest
@@ -67,11 +83,19 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.GOCICA_S3_REGION }}
           AWS_ACCESS_KEY_ID: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
-      - run: time go install std
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
   cache_gocica_s3:
     name: GoCICa S3(Cache)
     runs-on: ubuntu-latest
@@ -81,6 +105,11 @@ jobs:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
     steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
@@ -91,7 +120,10 @@ jobs:
           s3-region: ${{ secrets.GOCICA_S3_REGION }}
           s3-access-key: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
           s3-secret-access-key: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
-      - run: time go install std
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
   no_cache_default:
     name: action/cache(No Cache)
     runs-on: ubuntu-latest
@@ -102,6 +134,11 @@ jobs:
     env:
       GOCACHE: /tmp/go/cache
     steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
       - name: Clear cache
         uses: actions/github-script@v6
         with:
@@ -131,7 +168,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-      - run: time go install std
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
   cache_default:
     name: action/cache(Cache)
     runs-on: ubuntu-latest
@@ -143,6 +183,11 @@ jobs:
     env:
       GOCACHE: /tmp/go/cache
     steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
@@ -153,4 +198,7 @@ jobs:
           restore-keys: |
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
-      - run: time go install std
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
