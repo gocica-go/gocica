@@ -44,7 +44,7 @@ jobs:
       GOCACHE: /tmp/gocache/build
     steps:
       - name: Clear cache
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             console.log("About to clear")
@@ -212,7 +212,7 @@ jobs:
           ref: v3.22.0
           fetch-depth: 0
       - name: Clear cache
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             console.log("About to clear")
