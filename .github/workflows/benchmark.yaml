@@ -158,6 +158,9 @@ jobs:
               })
             }
             console.log("Clear completed")
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.1
       - uses: actions/cache@v4
         with:
           path: /tmp/go/cache
@@ -165,9 +168,6 @@ jobs:
           restore-keys: |
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.1
       - run: go mod download
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
