@@ -56,7 +56,7 @@ jobs:
         if: matrix.remote == 'github'
         uses: crazy-max/ghaction-github-runtime@v3
       - name: Build standard library
-        run: go install std
+        run: time go install std
         env:
           GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }}"
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
