@@ -121,7 +121,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	)
 	if size > 100*(2^10) {
 		buf := bytes.NewBuffer(nil)
-		zw := zstd.NewWriterLevel(buf, 12)
+		zw := zstd.NewWriterLevel(buf, 8)
 
 		if _, err := io.Copy(zw, r); err != nil {
 			return fmt.Errorf("compress data: %w", err)
