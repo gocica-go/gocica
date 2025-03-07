@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/DataDog/zstd"
+	lz4 "github.com/DataDog/golz4"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -92,7 +92,7 @@ func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w i
 
 	offset := d.headerSize + output.Offset
 	switch output.Compression {
-	case v1.Compression_COMPRESSION_ZSTD:
+	case v1.Compression_COMPRESSION_LZ4:
 		pr, pw := io.Pipe()
 		defer pr.Close()
 
@@ -105,10 +105,10 @@ func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w i
 			return nil
 		})
 
-		zr := zstd.NewReader(pr)
-		defer zr.Close()
+		dr := lz4.NewDecompressReader(pr)
+		defer dr.Close()
 
-		if _, err := io.Copy(w, zr); err != nil {
+		if _, err := io.Copy(w, dr); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return fmt.Errorf("copy decompressed data: %w", err)
 		}
 
