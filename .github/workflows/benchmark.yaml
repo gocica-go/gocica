@@ -38,7 +38,7 @@ jobs:
         with:
           go-version: 1.24.1
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
-      - run: go install std
+      - run: time go install std
   cache_gocica_github:
     name: GoCICa GitHub(Cache)
     runs-on: ubuntu-latest
@@ -52,7 +52,7 @@ jobs:
         with:
           go-version: 1.24.1
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
-      - run: go install std
+      - run: time go install std
   no_cache_gocica_s3:
     name: GoCICa S3(No Cache)
     runs-on: ubuntu-latest
@@ -71,7 +71,7 @@ jobs:
         with:
           go-version: 1.24.1
       - uses: gocica-go/gocica-action@v0.1.0-alpha1
-      - run: go install std
+      - run: time go install std
   cache_gocica_s3:
     name: GoCICa S3(Cache)
     runs-on: ubuntu-latest
@@ -91,7 +91,7 @@ jobs:
           s3-region: ${{ secrets.GOCICA_S3_REGION }}
           s3-access-key: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
           s3-secret-access-key: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
-      - run: go install std
+      - run: time go install std
   no_cache_default:
     name: action/cache(No Cache)
     runs-on: ubuntu-latest
@@ -131,7 +131,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-      - run: go install std
+      - run: time go install std
   cache_default:
     name: action/cache(Cache)
     runs-on: ubuntu-latest
@@ -153,4 +153,4 @@ jobs:
           restore-keys: |
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
-      - run: go install std
+      - run: time go install std
