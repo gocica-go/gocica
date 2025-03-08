@@ -107,10 +107,11 @@ jobs:
         if: matrix.remote == 'github'
         uses: crazy-max/ghaction-github-runtime@v3
       - run: go mod download
+      - run: mkdir ./tmp
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
           CGO_ENABLED: 0
-          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} --dev.cpu-prof=cpu.prof"
+          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} --dev.cpu-prof=./tmp/cpu.prof --dev.mem-prof=./tmp/cpu.prof --dev.metrics=./tmp/cpu.prof"
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
           GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
@@ -118,8 +119,8 @@ jobs:
       - name: Upload assets
         uses: actions/upload-artifact@v4
         with:
-          name: ${{matrix.remote}}-cpu.prof
-          path: ./cpu.prof
+          name: ${{matrix.remote}}-metrics
+          path: ./tmp
   test:
     name: Test
     runs-on: ubuntu-latest
