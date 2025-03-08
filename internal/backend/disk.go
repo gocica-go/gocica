@@ -13,7 +13,6 @@ import (
 
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
-	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -27,7 +26,6 @@ type Disk struct {
 	logger   log.Logger
 	rootPath string
 
-	sf              singleflight.Group
 	objectMapLocker sync.RWMutex
 	objectMap       map[string]struct{}
 }
@@ -122,64 +120,41 @@ func (d *Disk) Put(_ context.Context, outputID string, size int64, body io.Reade
 	}()
 	outputFilePath := d.objectFilePath(outputID)
 
-	var iN any
-	iN, err, _ := d.sf.Do(outputID, func() (v any, err error) {
-		var ok bool
-		func() {
-			d.objectMapLocker.RLock()
-			defer d.objectMapLocker.RUnlock()
-			_, ok = d.objectMap[outputID]
-		}()
-		if ok {
-			return nil, nil
-		}
+	var ok bool
+	func() {
+		d.objectMapLocker.RLock()
+		defer d.objectMapLocker.RUnlock()
+		_, ok = d.objectMap[outputID]
+	}()
+	if ok {
+		return "", nil
+	}
 
-		var f *os.File
-		f, err = os.Create(outputFilePath)
-		if err != nil {
-			return nil, fmt.Errorf("create output file: %w", err)
-		}
-		defer func() {
-			if closeErr := f.Close(); closeErr != nil {
-				err = errors.Join(err, fmt.Errorf("close output file: %w", closeErr))
-			}
-		}()
-
-		var n int64
-		if size != 0 {
-			n, err = io.Copy(f, body)
-			if err != nil {
-				return nil, fmt.Errorf("write output file: %w", err)
-			}
-		}
-
-		d.objectMapLocker.Lock()
-		defer d.objectMapLocker.Unlock()
-		d.objectMap[outputID] = struct{}{}
-
-		return n, nil
-	})
+	var f *os.File
+	f, err := os.Create(outputFilePath)
 	if err != nil {
-		return "", fmt.Errorf("do singleflight: %w", err)
+		return "", fmt.Errorf("create output file: %w", err)
 	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close output file: %w", closeErr))
+		}
+	}()
 
-	if iN == nil {
-		return outputFilePath, nil
-	}
-
-	n, ok := iN.(int64)
-	if !ok {
-		return "", fmt.Errorf("invalid type assertion: expected int64")
-	}
-	if n != size {
-		err = fmt.Errorf("%w: expected=%d, actual=%d", ErrSizeMismatch, size, n)
-		removeErr := os.Remove(outputFilePath)
-		if removeErr != nil {
-			err = errors.Join(err, fmt.Errorf("remove output file: %w", removeErr))
+	if size != 0 {
+		n, err := io.Copy(f, body)
+		if err != nil {
+			return "", fmt.Errorf("write output file: %w", err)
 		}
 
-		return "", err
+		if n != size {
+			return "", ErrSizeMismatch
+		}
 	}
+
+	d.objectMapLocker.Lock()
+	defer d.objectMapLocker.Unlock()
+	d.objectMap[outputID] = struct{}{}
 
 	return outputFilePath, nil
 }

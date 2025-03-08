@@ -10,6 +10,7 @@ import (
 	"time"
 
 	myio "github.com/mazrean/gocica/internal/pkg/io"
+	"github.com/mazrean/gocica/internal/pkg/locker"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
@@ -56,9 +57,8 @@ type ConbinedBackend struct {
 	local  LocalBackend
 	remote RemoteBackend
 
-	sf              singleflight.Group
-	objectMapLocker sync.RWMutex
-	objectMap       map[string]struct{}
+	objectMapLocker sync.Mutex
+	objectMap       map[string]*locker.WaitSuccess
 
 	eg                   *errgroup.Group
 	nowTimestamp         *timestamppb.Timestamp
@@ -71,7 +71,7 @@ func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBack
 	conbined := &ConbinedBackend{
 		logger:       logger,
 		eg:           &errgroup.Group{},
-		objectMap:    map[string]struct{}{},
+		objectMap:    map[string]*locker.WaitSuccess{},
 		local:        local,
 		remote:       remote,
 		nowTimestamp: timestamppb.Now(),
@@ -121,12 +121,76 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 		return "", nil, nil
 	}
 
-	diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
-	if err != nil {
-		return "", nil, fmt.Errorf("get local cache: %w", err)
-	}
+	var waitSuccess *locker.WaitSuccess
+	func() {
+		b.objectMapLocker.Lock()
+		defer b.objectMapLocker.Unlock()
+		waitSuccess, ok = b.objectMap[indexEntry.OutputId]
+		if !ok {
+			waitSuccess = locker.NewWaitSuccess()
+			b.objectMap[indexEntry.OutputId] = waitSuccess
+		}
+	}()
 
-	if diskPath != "" {
+	waitSuccess.Run(func() bool {
+		diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
+		if err != nil {
+			err = fmt.Errorf("get local cache: %w", err)
+			return false
+		}
+
+		if diskPath != "" {
+			func() {
+				b.newMetaDataMapLocker.Lock()
+				defer b.newMetaDataMapLocker.Unlock()
+				indexEntry.LastUsedAt = b.nowTimestamp
+				b.newMetaDataMap[actionID] = indexEntry
+			}()
+
+			return true
+		}
+
+		eg, ctx := errgroup.WithContext(ctx)
+		var r io.Reader
+		if indexEntry.Size == 0 {
+			r = myio.EmptyReader
+		} else {
+			pr, pw := io.Pipe()
+
+			r = pr
+
+			eg.Go(func() error {
+				defer pw.Close()
+
+				err := b.remote.Get(ctx, indexEntry.OutputId, indexEntry.Size, pw)
+				if err != nil {
+					return fmt.Errorf("get remote cache: %w", err)
+				}
+
+				return nil
+			})
+		}
+
+		diskPath, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size, r)
+		if err != nil {
+			if errors.Is(err, ErrSizeMismatch) {
+				err = nil
+				return false
+			}
+			err = fmt.Errorf("put: %w", err)
+			return false
+		}
+
+		if diskPath == "" {
+			err = nil
+			return false
+		}
+
+		if err := eg.Wait(); err != nil {
+			err = fmt.Errorf("wait for get remote cache: %w", err)
+			return false
+		}
+
 		func() {
 			b.newMetaDataMapLocker.Lock()
 			defer b.newMetaDataMapLocker.Unlock()
@@ -134,62 +198,17 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 			b.newMetaDataMap[actionID] = indexEntry
 		}()
 
-		return diskPath, &MetaData{
-			OutputID: indexEntry.OutputId,
-			Size:     indexEntry.Size,
-			Timenano: indexEntry.Timenano,
-		}, nil
-	}
-
-	eg, ctx := errgroup.WithContext(ctx)
-	var r io.Reader
-	if indexEntry.Size == 0 {
-		r = myio.EmptyReader
-	} else {
-		pr, pw := io.Pipe()
-
-		r = pr
-
-		eg.Go(func() error {
-			defer pw.Close()
-
-			err := b.remote.Get(ctx, indexEntry.OutputId, indexEntry.Size, pw)
-			if err != nil {
-				return fmt.Errorf("get remote cache: %w", err)
-			}
-
-			func() {
-				b.objectMapLocker.Lock()
-				defer b.objectMapLocker.Unlock()
-				b.objectMap[indexEntry.OutputId] = struct{}{}
-			}()
-
-			return nil
-		})
-	}
-
-	diskPath, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size, r)
-	if err != nil {
-		if errors.Is(err, ErrSizeMismatch) {
-			return "", nil, nil
+		return true
+	}, func() {
+		diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
+		if err != nil {
+			err = fmt.Errorf("get local cache: %w", err)
+			return
 		}
-		return "", nil, fmt.Errorf("put remote cache: %w", err)
+	})
+	if err != nil {
+		return "", nil, err
 	}
-
-	if diskPath == "" {
-		return "", nil, nil
-	}
-
-	if err := eg.Wait(); err != nil {
-		return "", nil, fmt.Errorf("wait for get remote cache: %w", err)
-	}
-
-	func() {
-		b.newMetaDataMapLocker.Lock()
-		defer b.newMetaDataMapLocker.Unlock()
-		indexEntry.LastUsedAt = b.nowTimestamp
-		b.newMetaDataMap[actionID] = indexEntry
-	}()
 
 	return diskPath, &MetaData{
 		OutputID: indexEntry.OutputId,
@@ -212,48 +231,54 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		b.newMetaDataMap[actionID] = indexEntry
 	}()
 
-	var (
-		localReader io.Reader
-	)
-	if size == 0 {
-		localReader = myio.EmptyReader
-	} else {
-		localReader = body
-		remoteReader := body.Clone()
+	var waitSuccess *locker.WaitSuccess
+	func() {
+		var ok bool
 
-		b.eg.Go(func() error {
-			_, err, _ := b.sf.Do(outputID, func() (any, error) {
-				var ok bool
-				func() {
-					b.objectMapLocker.RLock()
-					defer b.objectMapLocker.RUnlock()
-					_, ok = b.objectMap[outputID]
-				}()
-				if ok {
-					return nil, nil
+		b.objectMapLocker.Lock()
+		defer b.objectMapLocker.Unlock()
+
+		waitSuccess, ok = b.objectMap[outputID]
+		if !ok {
+			waitSuccess = locker.NewWaitSuccess()
+			b.objectMap[outputID] = waitSuccess
+		}
+	}()
+
+	waitSuccess.Run(func() bool {
+		var (
+			localReader io.Reader
+		)
+		if size == 0 {
+			localReader = myio.EmptyReader
+		} else {
+			localReader = body
+
+			b.eg.Go(func() error {
+				if err := b.remote.Put(context.Background(), outputID, size, body.Clone()); err != nil {
+					return fmt.Errorf("put remote cache: %w", err)
 				}
 
-				if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
-					return nil, fmt.Errorf("put remote cache: %w", err)
-				}
-
-				b.objectMapLocker.Lock()
-				defer b.objectMapLocker.Unlock()
-				b.objectMap[outputID] = struct{}{}
-
-				return nil, nil
+				return nil
 			})
-			if err != nil {
-				return fmt.Errorf("do singleflight: %w", err)
-			}
+		}
 
-			return nil
-		})
-	}
+		diskPath, err = b.local.Put(ctx, outputID, size, localReader)
+		if err != nil {
+			err = fmt.Errorf("put: %w", err)
+			return false
+		}
 
-	diskPath, err = b.local.Put(ctx, outputID, size, localReader)
+		return true
+	}, func() {
+		diskPath, err = b.local.Get(ctx, outputID)
+		if err != nil {
+			err = fmt.Errorf("get local cache: %w", err)
+			return
+		}
+	})
 	if err != nil {
-		return "", fmt.Errorf("put: %w", err)
+		return "", err
 	}
 
 	return diskPath, nil
@@ -297,6 +322,7 @@ type NoRemoteBackend struct {
 	logger log.Logger
 	local  LocalBackend
 
+	sf                   singleflight.Group
 	nowTimestamp         *timestamppb.Timestamp
 	metaDataMap          map[string]*v1.IndexEntry
 	newMetaDataMapLocker sync.Mutex
@@ -381,12 +407,15 @@ func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, si
 		r = body
 	}
 
-	diskPath, err = b.local.Put(ctx, outputID, size, r)
+	iDiskPath, err, _ := b.sf.Do(outputID, func() (any, error) {
+		diskPath, err := b.local.Put(ctx, outputID, size, r)
+		return diskPath, err
+	})
 	if err != nil {
 		return "", fmt.Errorf("put: %w", err)
 	}
 
-	return diskPath, nil
+	return iDiskPath.(string), nil
 }
 
 func (b *NoRemoteBackend) Close(ctx context.Context) error {
