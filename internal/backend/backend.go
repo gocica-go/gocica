@@ -415,7 +415,12 @@ func (b *NoRemoteBackend) Put(ctx context.Context, actionID, outputID string, si
 		return "", fmt.Errorf("put: %w", err)
 	}
 
-	return iDiskPath.(string), nil
+	diskPath, ok := iDiskPath.(string)
+	if !ok {
+		return "", fmt.Errorf("put: invalid return type")
+	}
+
+	return diskPath, nil
 }
 
 func (b *NoRemoteBackend) Close(ctx context.Context) error {
