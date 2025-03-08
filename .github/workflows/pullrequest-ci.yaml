@@ -41,12 +41,21 @@ jobs:
     strategy:
       matrix:
         remote: ["none", "github", "s3"]
+    env:
+      GOMODCACHE: /tmp/gocache/mod
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
+        with:
+          path: ${{ env.GOMODCACHE }}
+          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-${{ github.ref }}-
+            go-mod-${{ runner.os }}-
       - uses: actions/download-artifact@v4
         with:
           name: ${{ env.APP_NAME }}
@@ -63,6 +72,54 @@ jobs:
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
           GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
           GOCICA_S3_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+  traq_build:
+    name: Build traQ
+    needs: [build]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        remote: ["none", "github", "s3"]
+    env:
+      GOMODCACHE: /tmp/gocache/mod
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
+        with:
+          path: ${{ env.GOMODCACHE }}
+          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-${{ github.ref }}-
+            go-mod-${{ runner.os }}-
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}
+      - name: Fix permissions # ref: https://github.com/actions/download-artifact?tab=readme-ov-file#permission-loss
+        run: chmod +x ${{ env.APP_NAME }}
+      - name: Expose GitHub Actions runtime environment variables
+        if: matrix.remote == 'github'
+        uses: crazy-max/ghaction-github-runtime@v3
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
+          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} --dev.cpu-prof=cpu.prof"
+          GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
+          GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
+          GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
+          GOCICA_S3_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+      - name: Upload assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{matrix.remote}}-cpu.prof
+          path: ./cpu.prof
   test:
     name: Test
     runs-on: ubuntu-latest
