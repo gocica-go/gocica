@@ -25,7 +25,6 @@ df_tx = (
     .pivot_table(index="time", columns="label", values="value", aggfunc="last")
     .ffill()
 )
-print(df_tx)
 
 # Sort by time
 df_rx = df_rx.sort_index()
@@ -50,8 +49,6 @@ df_tx_rate = df_tx_rate / 1e6  # Convert to MB/s
 # Remove first row which is NaN due to diff operation
 df_rx_rate.dropna(inplace=True)
 df_tx_rate.dropna(inplace=True)
-
-print(df_tx_rate)
 
 # Plot graphs
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
