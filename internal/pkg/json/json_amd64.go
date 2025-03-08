@@ -1,4 +1,4 @@
-//go:build (amd64 || arm64)
+//go:build amd64 || arm64
 
 // This file is used when building for AMD64 architecture to utilize the high-performance Sonic JSON library
 
