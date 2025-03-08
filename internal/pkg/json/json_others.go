@@ -1,4 +1,4 @@
-//go:build (!amd64 && !arm64) || go1.24
+//go:build !amd64 && !arm64
 
 // This file is used when building for architectures that sonic library does not support
 // It uses the standard encoding/json library for JSON encoding and decoding operations
