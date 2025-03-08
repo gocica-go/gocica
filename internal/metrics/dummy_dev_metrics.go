@@ -8,7 +8,7 @@ func NewGauge(string) *Gauge {
 	return nil
 }
 
-func WriteMetrics(w io.Writer) error {
+func WriteMetrics(io.Writer) error {
 	return nil
 }
 
