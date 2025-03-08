@@ -34,7 +34,7 @@ func WriteMetrics(w io.Writer) error {
 	csvWriter := csv.NewWriter(w)
 	defer csvWriter.Flush()
 
-	csvWriter.Write([]string{"name", "value", "time"})
+	csvWriter.Write([]string{"name", "value", "time", "label"})
 
 	gaugesLocker.RLock()
 	defer gaugesLocker.RUnlock()
@@ -45,6 +45,7 @@ func WriteMetrics(w io.Writer) error {
 				gauge.name,
 				strconv.FormatFloat(record.value, 'f', -1, 64),
 				strconv.FormatInt(record.time.Sub(startTime).Nanoseconds(), 10),
+				record.label,
 			})
 			if err != nil {
 				return fmt.Errorf("write record: %w", err)
