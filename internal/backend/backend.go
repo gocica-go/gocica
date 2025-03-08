@@ -186,7 +186,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 			return false
 		}
 
-		if err := eg.Wait(); err != nil {
+		if err = eg.Wait(); err != nil {
 			err = fmt.Errorf("wait for get remote cache: %w", err)
 			return false
 		}
