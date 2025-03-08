@@ -11,16 +11,17 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/minio/minio-go/v7 v7.0.87
 	github.com/ory/dockertest/v3 v3.11.0
-	golang.org/x/oauth2 v0.27.0
+	golang.org/x/oauth2 v0.28.0
 	golang.org/x/sync v0.11.0
 	google.golang.org/protobuf v1.36.5
 )
+
+require github.com/DataDog/zstd v1.5.6
 
 require (
 	dario.cat/mergo v1.0.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.10.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
-	github.com/DataDog/zstd v1.5.6 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 // indirect
 	github.com/bytedance/sonic/loader v0.2.3 // indirect
