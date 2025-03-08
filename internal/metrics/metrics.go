@@ -44,7 +44,7 @@ func WriteMetrics(w io.Writer) error {
 			err := csvWriter.Write([]string{
 				gauge.name,
 				strconv.FormatFloat(record.value, 'f', -1, 64),
-				strconv.FormatFloat(record.time.Sub(startTime).Nanoseconds(), 'f', -1, 64),
+				strconv.FormatInt(record.time.Sub(startTime).Nanoseconds(), 10),
 			})
 			if err != nil {
 				return fmt.Errorf("write record: %w", err)
