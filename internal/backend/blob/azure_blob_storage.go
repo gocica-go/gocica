@@ -7,9 +7,11 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/mazrean/gocica/internal/metrics"
 )
 
 var _ UploadClient = (*AzureUploadClient)(nil)
+var latencyGauge = metrics.NewGauge("azure_blob_storage_latency")
 
 type AzureUploadClient struct {
 	client *blockblob.Client
@@ -29,7 +31,9 @@ func (a *AzureUploadClient) UploadBlock(ctx context.Context, blockID string, r i
 		return 0, fmt.Errorf("seek start: %w", err)
 	}
 
-	_, err = a.client.StageBlock(ctx, blockID, r, nil)
+	latencyGauge.Stapwatch(func() {
+		_, err = a.client.StageBlock(ctx, blockID, r, nil)
+	}, "stage_block")
 	if err != nil {
 		return 0, fmt.Errorf("stage block: %w", err)
 	}
@@ -38,9 +42,12 @@ func (a *AzureUploadClient) UploadBlock(ctx context.Context, blockID string, r i
 }
 
 func (a *AzureUploadClient) UploadBlockFromURL(ctx context.Context, blockID string, url string, offset, size int64) error {
-	_, err := a.client.StageBlockFromURL(ctx, blockID, url, &blockblob.StageBlockFromURLOptions{
-		Range: blob.HTTPRange{Offset: offset, Count: size},
-	})
+	var err error
+	latencyGauge.Stapwatch(func() {
+		_, err = a.client.StageBlockFromURL(ctx, blockID, url, &blockblob.StageBlockFromURLOptions{
+			Range: blob.HTTPRange{Offset: offset, Count: size},
+		})
+	}, "stage_block_from_url")
 	if err != nil {
 		return fmt.Errorf("stage block from url: %w", err)
 	}
@@ -49,7 +56,10 @@ func (a *AzureUploadClient) UploadBlockFromURL(ctx context.Context, blockID stri
 }
 
 func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string) error {
-	_, err := a.client.CommitBlockList(ctx, blockIDs, nil)
+	var err error
+	latencyGauge.Stapwatch(func() {
+		_, err = a.client.CommitBlockList(ctx, blockIDs, nil)
+	}, "commit_block_list")
 	if err != nil {
 		return fmt.Errorf("commit block list: %w", err)
 	}
@@ -72,9 +82,15 @@ func (a *AzureDownloadClient) GetURL(context.Context) string {
 }
 
 func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error {
-	res, err := a.client.DownloadStream(ctx, &blob.DownloadStreamOptions{
-		Range: blob.HTTPRange{Offset: offset, Count: size},
-	})
+	var (
+		res blob.DownloadStreamResponse
+		err error
+	)
+	latencyGauge.Stapwatch(func() {
+		res, err = a.client.DownloadStream(ctx, &blob.DownloadStreamOptions{
+			Range: blob.HTTPRange{Offset: offset, Count: size},
+		})
+	}, "download_stream")
 	if err != nil {
 		return fmt.Errorf("download stream: %w", err)
 	}
@@ -88,9 +104,12 @@ func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, s
 }
 
 func (a *AzureDownloadClient) DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error {
-	_, err := a.client.DownloadBuffer(ctx, buf, &blob.DownloadBufferOptions{
-		Range: blob.HTTPRange{Offset: offset, Count: size},
-	})
+	var err error
+	latencyGauge.Stapwatch(func() {
+		_, err = a.client.DownloadBuffer(ctx, buf, &blob.DownloadBufferOptions{
+			Range: blob.HTTPRange{Offset: offset, Count: size},
+		})
+	}, "download_buffer")
 	if err != nil {
 		return fmt.Errorf("download buffer: %w", err)
 	}

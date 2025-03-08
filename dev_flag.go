@@ -8,6 +8,8 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+
+	"github.com/mazrean/gocica/internal/metrics"
 )
 
 type DevFlag struct {
@@ -15,6 +17,7 @@ type DevFlag struct {
 	CPUProfRate int      `kong:"optional,help='CPU profiling rate in Hz',default='100'"`
 	CPUProfFile *os.File `kong:"-"`
 	MemProf     string   `kong:"optional,help='Memory profile output file',type='path'"`
+	Metrics     string   `kong:"optional,help='Metrics output file',type='path'"`
 }
 
 func (d DevFlag) StartProfiling() error {
@@ -30,13 +33,19 @@ func (d DevFlag) StartProfiling() error {
 		d.CPUProfFile = f
 	}
 
+	if d.Metrics != "" {
+		if err := metrics.InitProcStat(); err != nil {
+			return fmt.Errorf("failed to initialize proc stat: %w", err)
+		}
+	}
+
 	return nil
 }
 
 func (d DevFlag) StopProfiling() {
 	if d.CPUProfFile != nil {
 		pprof.StopCPUProfile()
-		d.CPUProfFile.Close()
+		defer d.CPUProfFile.Close()
 	}
 
 	if d.MemProf != "" {
@@ -50,6 +59,18 @@ func (d DevFlag) StopProfiling() {
 
 		if err := pprof.WriteHeapProfile(f); err != nil {
 			log.Fatal("could not write memory profile: ", err)
+		}
+	}
+
+	if d.Metrics != "" {
+		f, err := os.Create(d.Metrics)
+		if err != nil {
+			log.Fatal("could not create metrics file: ", err)
+		}
+		defer f.Close()
+
+		if err := metrics.WriteMetrics(f); err != nil {
+			log.Fatal("could not write metrics: ", err)
 		}
 	}
 }

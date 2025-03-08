@@ -11,12 +11,15 @@ import (
 	"sync"
 
 	"github.com/DataDog/zstd"
+	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 )
+
+var compressGauge = metrics.NewGauge("blob_compress_latency")
 
 type Uploader struct {
 	logger              log.Logger
@@ -121,9 +124,13 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	)
 	if size > 100*(2^10) {
 		buf := bytes.NewBuffer(nil)
-		zw := zstd.NewWriterLevel(buf, 10)
+		zw := zstd.NewWriterLevel(buf, 1)
 
-		if _, err := io.Copy(zw, r); err != nil {
+		var err error
+		compressGauge.Stapwatch(func() {
+			_, err = io.Copy(zw, r)
+		}, "compress_data")
+		if err != nil {
 			return fmt.Errorf("compress data: %w", err)
 		}
 
