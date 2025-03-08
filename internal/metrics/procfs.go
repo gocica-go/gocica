@@ -56,6 +56,7 @@ func getCPUAllStat(fs procfs.FS) error {
 	cpuAllGauge.Set(float64(stat.CPUTotal.System), "system")
 	cpuAllGauge.Set(float64(stat.CPUTotal.Idle), "idle")
 	cpuAllGauge.Set(float64(stat.CPUTotal.Iowait), "iowait")
+	cpuAllGauge.Set(float64(stat.CPUTotal.Nice), "nice")
 	cpuAllGauge.Set(float64(stat.CPUTotal.IRQ), "irq")
 	cpuAllGauge.Set(float64(stat.CPUTotal.SoftIRQ), "softirq")
 	cpuAllGauge.Set(float64(stat.CPUTotal.Steal), "steal")
