@@ -16,7 +16,11 @@ require (
 	google.golang.org/protobuf v1.36.5
 )
 
-require github.com/DataDog/zstd v1.5.6
+require (
+	github.com/DataDog/zstd v1.5.6
+	github.com/felixge/fgprof v0.9.5
+	github.com/prometheus/procfs v0.15.1
+)
 
 require (
 	dario.cat/mergo v1.0.1 // indirect
@@ -37,6 +41,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/google/pprof v0.0.0-20240227163752-401108e1b7e7 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect

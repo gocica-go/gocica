@@ -111,7 +111,7 @@ jobs:
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
           CGO_ENABLED: 0
-          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} --dev.cpu-prof=./tmp/cpu.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv"
+          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv"
           GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
           GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
           GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
