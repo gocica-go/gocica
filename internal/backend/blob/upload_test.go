@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"testing"
 	"time"
 
-	"github.com/DataDog/zstd"
+	lz4 "github.com/DataDog/golz4"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
@@ -322,11 +323,27 @@ func TestUploader_UploadOutput(t *testing.T) {
 			size:     100,
 			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
 				data := make([]byte, 100)
-				compressedData, err := zstd.Compress(nil, data)
+				compressedData := make([]byte, lz4.CompressBound(data))
+				n, err := lz4.CompressHC(compressedData, data)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("compress data: %w", err)
 				}
-				client.expectUploadBlock("test-output", int64(len(compressedData)), nil)
+				client.expectUploadBlock("test-output", int64(n), nil)
+				return myio.NopSeekCloser(bytes.NewReader(data)), nil
+			},
+		},
+		{
+			name:     "success with compression",
+			outputID: "test-output",
+			size:     200 * (1 << 10),
+			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
+				data := make([]byte, 200*(1<<10))
+				compressedData := make([]byte, lz4.CompressBound(data))
+				n, err := lz4.CompressHC(compressedData, data)
+				if err != nil {
+					return nil, fmt.Errorf("compress data: %w", err)
+				}
+				client.expectUploadBlock("test-output", int64(n), nil)
 				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
 		},
@@ -336,11 +353,12 @@ func TestUploader_UploadOutput(t *testing.T) {
 			size:     100,
 			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
 				data := make([]byte, 50)
-				compressedData, err := zstd.Compress(nil, data)
+				compressedData := make([]byte, lz4.CompressBound(data))
+				n, err := lz4.CompressHC(compressedData, data)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("compress data: %w", err)
 				}
-				client.expectUploadBlock("test-output", int64(len(compressedData)), nil)
+				client.expectUploadBlock("test-output", int64(n), nil)
 				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
 		},
@@ -350,11 +368,12 @@ func TestUploader_UploadOutput(t *testing.T) {
 			size:     100,
 			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
 				data := make([]byte, 100)
-				compressedData, err := zstd.Compress(nil, data)
+				compressedData := make([]byte, lz4.CompressBound(data))
+				n, err := lz4.CompressHC(compressedData, data)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("compress data: %w", err)
 				}
-				client.expectUploadBlock("test-output", int64(len(compressedData)), errors.New("upload error"))
+				client.expectUploadBlock("test-output", int64(n), errors.New("upload error"))
 				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
 			expectError: true,

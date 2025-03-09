@@ -10,7 +10,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/DataDog/zstd"
+	lz4 "github.com/DataDog/golz4"
 	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -122,24 +122,22 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 		reader      io.ReadSeeker
 		compression v1.Compression
 	)
-	if size > 100*(2^10) {
+	if size > 100*(1<<10) {
 		buf := bytes.NewBuffer(nil)
-		zw := zstd.NewWriterLevel(buf, 1)
+		lr := lz4.NewCompressReader(r)
+		defer func() {
+			if err := lr.Close(); err != nil {
+				u.logger.Warnf("close lz4 reader: %v", err)
+			}
+		}()
 
-		var err error
-		compressGauge.Stapwatch(func() {
-			_, err = io.Copy(zw, r)
-		}, "compress_data")
+		_, err := io.Copy(buf, lr)
 		if err != nil {
 			return fmt.Errorf("compress data: %w", err)
 		}
 
-		if err := zw.Close(); err != nil {
-			return fmt.Errorf("close compressor: %w", err)
-		}
-
 		reader = bytes.NewReader(buf.Bytes())
-		compression = v1.Compression_COMPRESSION_ZSTD
+		compression = v1.Compression_COMPRESSION_LZ4
 	} else {
 		reader = r
 		compression = v1.Compression_COMPRESSION_UNSPECIFIED
