@@ -8,10 +8,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/mazrean/gocica/internal/metrics"
-	"golang.org/x/sync/errgroup"
 )
-
-var _ UploadClient = (*AzureUploadClient)(nil)
 
 var _ UploadClient = (*AzureUploadClient)(nil)
 var latencyGauge = metrics.NewGauge("azure_blob_storage_latency")
@@ -84,52 +81,7 @@ func (a *AzureDownloadClient) GetURL(context.Context) string {
 	return a.client.URL()
 }
 
-const (
-	defaultChunkSize int64 = 4 * 1024 * 1024 // 4MB
-)
-
 func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error {
-	if size <= defaultChunkSize {
-		return a.downloadSingleChunk(ctx, offset, size, w)
-	}
-
-	chunks := (size + defaultChunkSize - 1) / defaultChunkSize
-	chunkData := make([][]byte, chunks)
-
-	eg, ctx := errgroup.WithContext(ctx)
-
-	for i := int64(0); i < chunks; i++ {
-		i := i // ループ変数のキャプチャ
-		start := offset + i*defaultChunkSize
-		var chunkSize int64 = defaultChunkSize
-		if i == chunks-1 {
-			chunkSize = size - (chunks-1)*defaultChunkSize
-		}
-
-		eg.Go(func() error {
-			buf := make([]byte, chunkSize)
-			if err := a.DownloadBlockBuffer(ctx, start, chunkSize, buf); err != nil {
-				return fmt.Errorf("download chunk %d at offset %d: %w", i, start, err)
-			}
-			chunkData[i] = buf
-			return nil
-		})
-	}
-
-	if err := eg.Wait(); err != nil {
-		return err
-	}
-
-	for i := int64(0); i < chunks; i++ {
-		if _, err := w.Write(chunkData[i]); err != nil {
-			return fmt.Errorf("write chunk %d: %w", i, err)
-		}
-	}
-
-	return nil
-}
-
-func (a *AzureDownloadClient) downloadSingleChunk(ctx context.Context, offset int64, size int64, w io.Writer) error {
 	var (
 		res blob.DownloadStreamResponse
 		err error
