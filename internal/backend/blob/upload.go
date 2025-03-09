@@ -131,7 +131,10 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 			}
 		}()
 
-		_, err := io.Copy(buf, lr)
+		var err error
+		compressGauge.Stapwatch(func() {
+			_, err = io.Copy(buf, lr)
+		}, "compress")
 		if err != nil {
 			return fmt.Errorf("compress data: %w", err)
 		}
