@@ -14,6 +14,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/mazrean/gocica/internal/backend/blob"
+	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -22,6 +23,8 @@ import (
 )
 
 var _ RemoteBackend = &GitHubActionsCache{}
+
+var latencyGauge = metrics.NewGauge("github_actions_cache_latency")
 
 type GitHubActionsCache struct {
 	logger log.Logger
@@ -158,7 +161,10 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := c.githubClient.Do(req)
+	var res *http.Response
+	latencyGauge.Stapwatch(func() {
+		res, err = c.githubClient.Do(req)
+	}, endpoint)
 	if err != nil {
 		return fmt.Errorf("do request: %w", err)
 	}
