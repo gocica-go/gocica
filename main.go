@@ -23,7 +23,6 @@ var (
 // CLI represents command line options and configuration file values
 var CLI struct {
 	Version  kong.VersionFlag `kong:"short='v',help='Show version and exit.'"`
-	Config   kong.ConfigFlag  `kong:"chort='c',help='Load configuration from a file.'"`
 	Dir      string           `kong:"short='d',optional,help='Directory to store cache files',env='GOCICA_DIR'"`
 	LogLevel string           `kong:"short='l',default='info',enum='debug,info,warn,error,silent',help='Log level',env='GOCICA_LOG_LEVEL'"`
 	Github   struct {
@@ -36,29 +35,12 @@ var CLI struct {
 	Dev DevFlag `kong:"group='dev',embed,prefix='dev.'"`
 }
 
-// loadConfig loads and parses configuration from command line arguments and config files
+// loadConfig loads and parses configuration from command line arguments
 func loadConfig(logger log.Logger) (*kong.Context, error) {
-	// Find config file paths
-	var configPaths []string
-	wd, err := os.Getwd()
-	if err == nil {
-		configPaths = append(configPaths, filepath.Join(wd, ".gocica.json"))
-	} else {
-		logger.Warnf("failed to get working directory. ignoring config file in working directory")
-	}
-
-	userHomeDir, err := os.UserHomeDir()
-	if err == nil {
-		configPaths = append(configPaths, filepath.Join(userHomeDir, ".gocica.json"))
-	} else {
-		logger.Warnf("failed to get user home directory. ignoring config file in user home directory")
-	}
-
-	// Parse command line arguments and config files
+	// Parse command line arguments
 	parser := kong.Must(&CLI,
 		kong.Name("gocica"),
 		kong.Description("A fast GOCACHEPROG implementation for CI"),
-		kong.Configuration(kong.JSON, configPaths...),
 		kong.Vars{"version": fmt.Sprintf("%s (%s)", version, revision)},
 		kong.UsageOnError(),
 	)
