@@ -1,7 +1,3 @@
-//go:build amd64 || arm64
-
-// This file is used when building for AMD64 architecture to utilize the high-performance Sonic JSON library
-
 package json // Package json provides a unified interface for JSON encoding and decoding operations
 
 import (
@@ -10,8 +6,6 @@ import (
 	"github.com/bytedance/sonic/decoder"
 	"github.com/bytedance/sonic/encoder"
 )
-
-const Library = "github.com/bytedance/sonic"
 
 // Decoder represents a JSON decoder that utilizes the high-performance Sonic decoder for AMD64 architecture
 type Decoder struct {
