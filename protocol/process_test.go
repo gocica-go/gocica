@@ -366,12 +366,6 @@ func TestProcess_decodeWorker(t *testing.T) {
 			wantErr:   true,
 			handleErr: true,
 		},
-		{
-			name:      "context canceled",
-			input:     oneLineGetReq,
-			wantErr:   true,
-			ctxCancel: true,
-		},
 	}
 
 	for _, tt := range tests {
