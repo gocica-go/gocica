@@ -101,7 +101,7 @@ func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, s
 	for i := int64(0); i < chunks; i++ {
 		i := i // ループ変数のキャプチャ
 		start := offset + i*defaultChunkSize
-		chunkSize := defaultChunkSize
+		var chunkSize int64 = defaultChunkSize
 		if i == chunks-1 {
 			chunkSize = size - (chunks-1)*defaultChunkSize
 		}
