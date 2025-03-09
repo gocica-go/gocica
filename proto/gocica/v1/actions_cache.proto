@@ -9,7 +9,6 @@ import "gocica/v1/index_entry.proto";
 enum Compression {
   COMPRESSION_UNSPECIFIED = 0;
   COMPRESSION_ZSTD = 1;
-  COMPRESSION_LZ4 = 2;
 }
 
 message ActionsOutput {

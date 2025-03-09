@@ -9,7 +9,6 @@ import (
 	"io"
 	"testing"
 
-	lz4 "github.com/DataDog/golz4"
 	"github.com/DataDog/zstd"
 	"github.com/google/go-cmp/cmp"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -346,39 +345,6 @@ func TestDownloader_DownloadOutputBlock(t *testing.T) {
 					method: "DownloadBlock",
 					args:   []any{nil, headerSize + 100, int64(50)}, // サイズは圧縮前のサイズを使用
 					result: []any{compressedData, nil},
-				})
-				return nil
-			},
-			expectContent: bytes.Repeat([]byte{0xAA}, 50),
-		},
-		{
-			name: "success with lz4 compression",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        50,
-						Compression: v1.Compression_COMPRESSION_LZ4,
-					},
-				},
-				OutputTotalSize: 150,
-			},
-			blobID: "test",
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
-				data := bytes.NewReader(bytes.Repeat([]byte{0xAA}, 50))
-				var compressedBuf bytes.Buffer
-				lr := lz4.NewCompressReader(data)
-				defer lr.Close()
-
-				_, err := io.Copy(&compressedBuf, lr)
-				if err != nil {
-					return fmt.Errorf("compress data: %w", err)
-				}
-
-				client.calls = append(client.calls, mockCall{
-					method: "DownloadBlock",
-					args:   []any{nil, headerSize + 100, int64(50)},
-					result: []any{compressedBuf.Bytes(), nil},
 				})
 				return nil
 			},
