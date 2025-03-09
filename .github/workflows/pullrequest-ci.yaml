@@ -38,9 +38,6 @@ jobs:
     name: Build standard library
     needs: [build]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        remote: ["none", "github", "s3"]
     env:
       GOMODCACHE: /tmp/gocache/mod
     steps:
@@ -62,23 +59,15 @@ jobs:
       - name: Fix permissions # ref: https://github.com/actions/download-artifact?tab=readme-ov-file#permission-loss
         run: chmod +x ${{ env.APP_NAME }}
       - name: Expose GitHub Actions runtime environment variables
-        if: matrix.remote == 'github'
         uses: crazy-max/ghaction-github-runtime@v3
       - name: Build standard library
         run: time go install std
         env:
-          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }}"
-          GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
-          GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
-          GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
-          GOCICA_S3_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+          GOCACHEPROG: "./${{ env.APP_NAME }}"
   traq_build:
     name: Build traQ
     needs: [build]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        remote: ["none", "github", "s3"]
     env:
       GOMODCACHE: /tmp/gocache/mod
     steps:
@@ -104,22 +93,17 @@ jobs:
       - name: Fix permissions # ref: https://github.com/actions/download-artifact?tab=readme-ov-file#permission-loss
         run: chmod +x ./${{ env.APP_NAME }}
       - name: Expose GitHub Actions runtime environment variables
-        if: matrix.remote == 'github'
         uses: crazy-max/ghaction-github-runtime@v3
       - run: go mod download
       - run: mkdir ./tmp
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
           CGO_ENABLED: 0
-          GOCACHEPROG: "./${{ env.APP_NAME }} -r ${{ matrix.remote }} --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv"
-          GOCICA_S3_BUCKET: ${{ secrets.GOCICA_S3_BUCKET }}
-          GOCICA_S3_REGION: ${{ secrets.GOCICA_S3_REGION }}
-          GOCICA_S3_ACCESS_KEY: ${{ secrets.GOCICA_S3_ACCESS_KEY }}
-          GOCICA_S3_SECRET_ACCESS_KEY: ${{ secrets.GOCICA_S3_SECRET_ACCESS_KEY }}
+          GOCACHEPROG: "./${{ env.APP_NAME }} --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv"
       - name: Upload assets
         uses: actions/upload-artifact@v4
         with:
-          name: ${{matrix.remote}}-metrics
+          name: metrics
           path: ./tmp
   test:
     name: Test
