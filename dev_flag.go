@@ -14,23 +14,22 @@ import (
 
 type DevFlag struct {
 	CPUProf     string   `kong:"optional,help='CPU profile output file',type='path'"`
-	CPUProfRate int      `kong:"optional,help='CPU profiling rate in Hz',default='100'"`
 	CPUProfFile *os.File `kong:"-"`
 	MemProf     string   `kong:"optional,help='Memory profile output file',type='path'"`
 	Metrics     string   `kong:"optional,help='Metrics output file',type='path'"`
 }
 
-func (d DevFlag) StartProfiling() error {
+func (d *DevFlag) StartProfiling() error {
 	if d.CPUProf != "" {
 		f, err := os.Create(d.CPUProf)
 		if err != nil {
 			return fmt.Errorf("failed to create CPU profile file: %w", err)
 		}
+		d.CPUProfFile = f
 
 		if err := pprof.StartCPUProfile(f); err != nil {
 			return fmt.Errorf("failed to start CPU profiling: %w", err)
 		}
-		d.CPUProfFile = f
 	}
 
 	if d.Metrics != "" {
@@ -42,7 +41,7 @@ func (d DevFlag) StartProfiling() error {
 	return nil
 }
 
-func (d DevFlag) StopProfiling() {
+func (d *DevFlag) StopProfiling() {
 	if d.CPUProfFile != nil {
 		pprof.StopCPUProfile()
 		defer d.CPUProfFile.Close()
