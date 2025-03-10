@@ -25,7 +25,6 @@ type Backend interface {
 
 type LocalBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
-	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
 	Get(ctx context.Context, outputID string) (diskPath string, err error)
 	Put(ctx context.Context, outputID string, size int64, body io.Reader) (diskPath string, err error)
 	Close(ctx context.Context) error
@@ -288,20 +287,12 @@ func (b *ConbinedBackend) Close(ctx context.Context) error {
 		return fmt.Errorf("wait for all tasks: %w", err)
 	}
 
-	b.eg.Go(func() error {
-		if err := b.remote.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
-			return fmt.Errorf("write remote metadata: %w", err)
-		}
+	if err := b.remote.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
+		return fmt.Errorf("write remote metadata: %w", err)
+	}
 
-		if err := b.remote.Close(ctx); err != nil {
-			return fmt.Errorf("close remote backend: %w", err)
-		}
-
-		return nil
-	})
-
-	if err := b.local.WriteMetaData(context.Background(), b.newMetaDataMap); err != nil {
-		return fmt.Errorf("write metadata: %w", err)
+	if err := b.remote.Close(ctx); err != nil {
+		return fmt.Errorf("close remote backend: %w", err)
 	}
 
 	if err := b.local.Close(ctx); err != nil {
