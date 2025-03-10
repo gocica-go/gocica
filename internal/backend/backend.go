@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -26,7 +25,7 @@ type Backend interface {
 type LocalBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
 	Get(ctx context.Context, outputID string) (diskPath string, err error)
-	Put(ctx context.Context, outputID string, size int64, body io.Reader) (diskPath string, err error)
+	Put(ctx context.Context, outputID string, size int64) (diskPath string, w io.WriteCloser, err error)
 	Close(ctx context.Context) error
 }
 
@@ -148,45 +147,20 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 			return true
 		}
 
-		eg, ctx := errgroup.WithContext(ctx)
-		var r io.Reader
-		if indexEntry.Size == 0 {
-			r = myio.EmptyReader
-		} else {
-			pr, pw := io.Pipe()
-
-			r = pr
-
-			eg.Go(func() error {
-				defer pw.Close()
-
-				err := b.remote.Get(ctx, indexEntry.OutputId, indexEntry.Size, pw)
-				if err != nil {
-					return fmt.Errorf("get remote cache: %w", err)
-				}
-
-				return nil
-			})
-		}
-
-		diskPath, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size, r)
+		var w io.WriteCloser
+		diskPath, w, err = b.local.Put(ctx, indexEntry.OutputId, indexEntry.Size)
 		if err != nil {
-			if errors.Is(err, ErrSizeMismatch) {
-				err = nil
-				return false
-			}
 			err = fmt.Errorf("put: %w", err)
 			return false
 		}
+		defer w.Close()
 
-		if diskPath == "" {
-			err = nil
-			return false
-		}
-
-		if err = eg.Wait(); err != nil {
-			err = fmt.Errorf("wait for get remote cache: %w", err)
-			return false
+		if indexEntry.Size != 0 {
+			err := b.remote.Get(ctx, indexEntry.OutputId, indexEntry.Size, w)
+			if err != nil {
+				err = fmt.Errorf("get remote cache: %w", err)
+				return false
+			}
 		}
 
 		func() {
@@ -244,27 +218,19 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	}()
 
 	waitSuccess.Run(func() bool {
-		var (
-			localReader io.Reader
-		)
-		if size == 0 {
-			localReader = myio.EmptyReader
-		} else {
-			localReader = body
-
-			b.eg.Go(func() error {
-				if err := b.remote.Put(context.Background(), outputID, size, body.Clone()); err != nil {
-					return fmt.Errorf("put remote cache: %w", err)
-				}
-
-				return nil
-			})
-		}
-
-		diskPath, err = b.local.Put(ctx, outputID, size, localReader)
+		var w io.WriteCloser
+		diskPath, w, err = b.local.Put(ctx, outputID, size)
 		if err != nil {
 			err = fmt.Errorf("put: %w", err)
 			return false
+		}
+		defer w.Close()
+
+		if size != 0 {
+			if err := b.remote.Put(context.Background(), outputID, size, body.Clone()); err != nil {
+				err = fmt.Errorf("put remote cache: %w", err)
+				return false
+			}
 		}
 
 		return true
