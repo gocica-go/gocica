@@ -23,7 +23,6 @@ type Backend interface {
 }
 
 type LocalBackend interface {
-	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
 	Get(ctx context.Context, outputID string) (diskPath string, err error)
 	Put(ctx context.Context, outputID string, size int64) (diskPath string, w io.WriteCloser, err error)
 	Close(ctx context.Context) error
@@ -80,30 +79,16 @@ func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBack
 }
 
 func (b *ConbinedBackend) start() {
-	metaDataMap, err := b.local.MetaData(context.Background())
-	if err != nil {
-		b.logger.Warnf("parse local metadata: %v. ignore the all local cache.", err)
-	}
-
-	remoteMetaDataMap, err := b.remote.MetaData(context.Background())
+	var err error
+	b.metaDataMap, err = b.remote.MetaData(context.Background())
 	if err != nil {
 		b.logger.Warnf("parse remote metadata: %v. ignore the all remote cache.", err)
 	}
-
-	b.metaDataMap = metaDataMap
 	if b.metaDataMap == nil {
-		b.metaDataMap = make(map[string]*v1.IndexEntry, len(remoteMetaDataMap))
-	}
-	for actionID, remoteMetaData := range remoteMetaDataMap {
-		localMetaData, ok := b.metaDataMap[actionID]
-		if ok && localMetaData.LastUsedAt.AsTime().After(remoteMetaData.LastUsedAt.AsTime()) {
-			continue
-		}
-
-		b.metaDataMap[actionID] = remoteMetaData
+		b.metaDataMap = map[string]*v1.IndexEntry{}
 	}
 
-	b.newMetaDataMap = make(map[string]*v1.IndexEntry, len(metaDataMap))
+	b.newMetaDataMap = make(map[string]*v1.IndexEntry, len(b.metaDataMap))
 	metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
 	for actionID, metaData := range b.metaDataMap {
 		if metaData.LastUsedAt.AsTime().After(metaLimitLastUsedAt) {

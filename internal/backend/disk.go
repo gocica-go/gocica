@@ -5,14 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
 
-	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -44,23 +41,6 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 	}
 
 	return disk, nil
-}
-
-func (d *Disk) MetaData(context.Context) (map[string]*v1.IndexEntry, error) {
-	buf, err := os.ReadFile(filepath.Join(d.rootPath, metadataFilePath))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read metadata file: %w", err)
-	}
-
-	indexEntryMap := &v1.IndexEntryMap{}
-	if err := proto.Unmarshal(buf, indexEntryMap); err != nil {
-		return nil, fmt.Errorf("unmarshal metadata: %w", err)
-	}
-
-	return indexEntryMap.Entries, nil
 }
 
 func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err error) {
