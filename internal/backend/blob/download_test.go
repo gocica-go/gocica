@@ -311,7 +311,7 @@ func TestDownloader_GetEntries(t *testing.T) {
 	}
 }
 
-func TestDownloader_DownloadOutputBlock(t *testing.T) {
+func TestDownloader_GetOutputBlockURL(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

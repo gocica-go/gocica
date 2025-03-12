@@ -30,7 +30,6 @@ type LocalBackend interface {
 type RemoteBackend interface {
 	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
 	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
-	Get(ctx context.Context, objectID string, size int64, w io.Writer) error
 	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
 	Close(ctx context.Context) error
 }

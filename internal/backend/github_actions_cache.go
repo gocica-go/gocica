@@ -299,21 +299,6 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 	return nil
 }
 
-func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, _ int64, w io.Writer) error {
-	if c.downloader == nil {
-		return nil
-	}
-
-	if err := c.downloader.DownloadOutputBlock(ctx, objectID, w); err != nil {
-		if errors.Is(err, blob.ErrOutputNotFound) {
-			return nil
-		}
-		return fmt.Errorf("download output block: %w", err)
-	}
-
-	return nil
-}
-
 func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
 	if c.uploader == nil {
 		return nil

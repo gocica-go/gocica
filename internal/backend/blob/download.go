@@ -3,7 +3,6 @@ package blob
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -79,54 +78,6 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 	size = d.header.OutputTotalSize
 
 	return url, offset, size, nil
-}
-
-var ErrOutputNotFound = errors.New("output not found")
-
-func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w io.Writer) error {
-	output, ok := d.header.Outputs[blobID]
-	if !ok {
-		return ErrOutputNotFound
-	}
-
-	if output.Size <= 0 {
-		return fmt.Errorf("invalid output size: %d", output.Size)
-	}
-
-	offset := d.headerSize + output.Offset
-	switch output.Compression {
-	case v1.Compression_COMPRESSION_ZSTD:
-		pr, pw := io.Pipe()
-		defer pr.Close()
-
-		eg := errgroup.Group{}
-		eg.Go(func() error {
-			defer pw.Close()
-			if err := d.client.DownloadBlock(ctx, offset, output.Size, pw); err != nil {
-				return fmt.Errorf("download block: %w", err)
-			}
-			return nil
-		})
-
-		zr := zstd.NewReader(pr)
-		defer zr.Close()
-
-		if _, err := io.Copy(w, zr); err != nil {
-			return fmt.Errorf("copy decompressed data: %w", err)
-		}
-
-		if err := eg.Wait(); err != nil {
-			return err
-		}
-	case v1.Compression_COMPRESSION_UNSPECIFIED:
-		if err := d.client.DownloadBlock(ctx, offset, output.Size, w); err != nil {
-			return fmt.Errorf("download block: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported compression: %v", output.Compression)
-	}
-
-	return nil
 }
 
 type outputPair struct {
