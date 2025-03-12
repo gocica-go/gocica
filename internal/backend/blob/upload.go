@@ -145,15 +145,21 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 		compression = v1.Compression_COMPRESSION_UNSPECIFIED
 	}
 
-	size, err := u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(reader))
-	if err != nil {
-		return fmt.Errorf("upload block: %w", err)
+	var uploadSize int64
+	if size == 0 {
+		uploadSize = 0
+	} else {
+		var err error
+		uploadSize, err = u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(reader))
+		if err != nil {
+			return fmt.Errorf("upload block: %w", err)
+		}
 	}
 
 	u.outputSizeMapLocker.Lock()
 	defer u.outputSizeMapLocker.Unlock()
 	u.outputSizeMap[outputID] = &v1.ActionsOutput{
-		Size:        size,
+		Size:        uploadSize,
 		Compression: compression,
 	}
 
@@ -179,7 +185,9 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string
 		output.Offset = offset
 		outputs[outputID] = output
 		offset += output.Size
-		newOutputIDs = append(newOutputIDs, outputID)
+		if output.Size != 0 {
+			newOutputIDs = append(newOutputIDs, outputID)
+		}
 	}
 
 	return newOutputIDs, outputs, offset
