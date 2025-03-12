@@ -124,8 +124,8 @@ func TestJoinedWriter(t *testing.T) {
 					writer = buffers[i]
 				}
 				writers = append(writers, WriterWithSize{
-					writer: writer,
-					size:   w.size,
+					Writer: writer,
+					Size:   w.size,
 				})
 			}
 
