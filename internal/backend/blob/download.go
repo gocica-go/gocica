@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/DataDog/zstd"
+	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -121,6 +124,87 @@ func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w i
 		}
 	default:
 		return fmt.Errorf("unsupported compression: %v", output.Compression)
+	}
+
+	return nil
+}
+
+type outputPair struct {
+	blobID string
+	output *v1.ActionsOutput
+}
+
+type chunkBlob struct {
+	blobID string
+	size   int64
+}
+
+const maxChunkSize = 4 * (1 << 20)
+
+// openFileLimit is the maximum number of files that can be opened at the same time.
+// ref: https://github.com/golang/go/issues/46279
+const openFileLimit = 100000
+
+func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(objectID string) (io.WriteCloser, error)) error {
+	outputs := make([]outputPair, 0, len(d.header.Outputs))
+	for blobID, output := range d.header.Outputs {
+		outputs = append(outputs, outputPair{blobID: blobID, output: output})
+	}
+
+	slices.SortFunc(outputs, func(x, y outputPair) int {
+		return int(x.output.Offset - y.output.Offset)
+	})
+
+	eg := errgroup.Group{}
+
+	s := semaphore.NewWeighted(openFileLimit)
+	offset := d.headerSize
+	for i := 0; i < len(outputs); {
+		chunkOffset := offset
+		chunkSize := int64(0)
+		chunkWriters := []myio.WriterWithSize{}
+		chunkCloseFuncs := []func() error{}
+		for j := i; j < len(outputs) && chunkSize < maxChunkSize; j++ {
+			offset += outputs[j].output.Size
+			chunkSize += outputs[j].output.Size
+
+			err := s.Acquire(ctx, 1)
+			if err != nil {
+				return fmt.Errorf("acquire semaphore: %w", err)
+			}
+
+			w, err := objectWriterFunc(outputs[j].blobID)
+			if err != nil {
+				return fmt.Errorf("get object writer: %w", err)
+			}
+			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
+
+			chunkWriters = append(chunkWriters, myio.WriterWithSize{
+				Writer: w,
+				Size:   outputs[j].output.Size,
+			})
+		}
+
+		eg.Go(func() error {
+			defer s.Release(int64(len(chunkWriters)))
+			defer func() {
+				for _, closeFunc := range chunkCloseFuncs {
+					closeFunc()
+				}
+			}()
+
+			jw := myio.NewJoinedWriter(chunkWriters...)
+
+			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
+				return fmt.Errorf("download block: %w", err)
+			}
+
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	return nil
