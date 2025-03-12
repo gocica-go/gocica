@@ -43,6 +43,7 @@ func NewGitHubActionsCache(
 	token string,
 	strBaseURL string,
 	runnerOS, ref, sha string,
+	localBackend LocalBackend,
 ) (*GitHubActionsCache, error) {
 	baseURL, err := url.Parse(strBaseURL)
 	if err != nil {
@@ -71,6 +72,16 @@ func NewGitHubActionsCache(
 	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
 		return nil, fmt.Errorf("setup uploader: %w", err)
 	}
+
+	// Download all output blocks in the background.
+	go func() {
+		if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
+			_, w, err := localBackend.Put(ctx, objectID, 0)
+			return w, err
+		}); err != nil {
+			logger.Errorf("download all output blocks: %v", err)
+		}
+	}()
 
 	logger.Infof("GitHub Actions cache backend initialized.")
 
