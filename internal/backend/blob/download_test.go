@@ -605,7 +605,7 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 			}
 
 			writers := make(map[string]*mockWriteCloser)
-			err = downloader.DownloadAllOutputBlocks(t.Context(), func(objectID string) (io.WriteCloser, error) {
+			err = downloader.DownloadAllOutputBlocks(t.Context(), func(_ context.Context, objectID string) (io.WriteCloser, error) {
 				if tt.writerError {
 					return nil, errors.New("writer error")
 				}

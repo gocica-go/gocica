@@ -96,7 +96,7 @@ const maxChunkSize = 4 * (1 << 20)
 // ref: https://github.com/golang/go/issues/46279
 const openFileLimit = 100000
 
-func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(objectID string) (io.WriteCloser, error)) error {
+func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
 	outputs := make([]outputPair, 0, len(d.header.Outputs))
 	for blobID, output := range d.header.Outputs {
 		outputs = append(outputs, outputPair{blobID: blobID, output: output})
@@ -125,7 +125,7 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 				return fmt.Errorf("acquire semaphore: %w", err)
 			}
 
-			w, err := objectWriterFunc(outputs[i].blobID)
+			w, err := objectWriterFunc(ctx, outputs[i].blobID)
 			if err != nil {
 				return fmt.Errorf("get object writer: %w", err)
 			}
