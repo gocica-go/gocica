@@ -84,6 +84,7 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 		CLI.Github.Token,
 		CLI.Github.CacheURL,
 		CLI.Github.RunnerOS, CLI.Github.Ref, CLI.Github.Sha,
+		diskBackend,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create GitHub Actions Cache backend: %w", err)
