@@ -216,7 +216,3 @@ func (b *ConbinedBackend) Close(ctx context.Context) error {
 func encodeID(id string) string {
 	return strings.ReplaceAll(id, "/", "-")
 }
-
-func decodeID(id string) string {
-	return strings.ReplaceAll(id, "-", "/")
-}
