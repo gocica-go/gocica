@@ -53,7 +53,7 @@ func (m *mockDownloadClient) DownloadBlock(_ context.Context, offset int64, size
 			}
 		}
 	}
-	return errors.New("unexpected DownloadBlock call")
+	return fmt.Errorf("unexpected DownloadBlock call: offset=%d, size=%d", offset, size)
 }
 
 func (m *mockDownloadClient) DownloadBlockBuffer(_ context.Context, offset int64, size int64, buf []byte) error {
@@ -92,6 +92,14 @@ func (m *mockDownloadClient) expectDownloadBlockBuffer(offset, size int64, data 
 	m.calls = append(m.calls, mockCall{
 		method: "DownloadBlockBuffer",
 		args:   []any{nil, offset, size, nil}, // Add context placeholder as nil
+		result: []any{data, err},
+	})
+}
+
+func (m *mockDownloadClient) expectDownloadBlock(offset, size int64, data []byte, err error) {
+	m.calls = append(m.calls, mockCall{
+		method: "DownloadBlock",
+		args:   []any{nil, offset, size, nil},
 		result: []any{data, err},
 	})
 }
@@ -315,194 +323,6 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		header        *v1.ActionsCache
-		blobID        string
-		setupMock     func(*mockDownloadClient, int64) error
-		expectContent []byte
-		expectError   bool
-	}{
-		{
-			name: "success with zstd compression",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        50,
-						Compression: v1.Compression_COMPRESSION_ZSTD,
-					},
-				},
-				OutputTotalSize: 150,
-			},
-			blobID: "test",
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
-				data := bytes.Repeat([]byte{0xAA}, 50)
-				compressedData, err := zstd.Compress(nil, data)
-				if err != nil {
-					return fmt.Errorf("compress data: %w", err)
-				}
-				client.calls = append(client.calls, mockCall{
-					method: "DownloadBlock",
-					args:   []any{nil, headerSize + 100, int64(50)}, // サイズは圧縮前のサイズを使用
-					result: []any{compressedData, nil},
-				})
-				return nil
-			},
-			expectContent: bytes.Repeat([]byte{0xAA}, 50),
-		},
-		{
-			name: "success without compression",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        50,
-						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
-					},
-				},
-				OutputTotalSize: 150,
-			},
-			blobID: "test",
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
-				data := bytes.Repeat([]byte{0xAA}, 50)
-				client.calls = append(client.calls, mockCall{
-					method: "DownloadBlock",
-					args:   []any{nil, headerSize + 100, int64(50)},
-					result: []any{data, nil},
-				})
-				return nil
-			},
-			expectContent: bytes.Repeat([]byte{0xAA}, 50),
-		},
-		{
-			name: "unsupported compression",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        50,
-						Compression: v1.Compression(100),
-					},
-				},
-				OutputTotalSize: 150,
-			},
-			blobID:      "test",
-			expectError: true,
-		},
-		{
-			name: "output not found",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{},
-			},
-			blobID:      "test",
-			expectError: true,
-		},
-		{
-			name: "download error with zstd compression",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        50,
-						Compression: v1.Compression_COMPRESSION_ZSTD,
-					},
-				},
-			},
-			blobID: "test",
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
-				client.calls = append(client.calls, mockCall{
-					method: "DownloadBlock",
-					args:   []any{nil, headerSize + 100, int64(50)},
-					result: []any{nil, errors.New("download error")},
-				})
-				return nil
-			},
-			expectError: true,
-		},
-		{
-			name: "zero size output",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        0,
-						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
-					},
-				},
-			},
-			blobID:      "test",
-			expectError: true,
-		},
-		{
-			name: "negative size output",
-			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
-						Offset:      100,
-						Size:        -1,
-						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
-					},
-				},
-			},
-			blobID:      "test",
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			client := &mockDownloadClient{}
-			headerBytes, err := proto.Marshal(tt.header)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			sizeBuf := make([]byte, 8)
-			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
-			headerSize := int64(8 + len(headerBytes))
-
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
-
-			if tt.setupMock != nil {
-				err := tt.setupMock(client, headerSize)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			downloader, err := NewDownloader(t.Context(), client)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			var buf bytes.Buffer
-			err = downloader.DownloadOutputBlock(t.Context(), tt.blobID, &buf)
-
-			if tt.expectError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if diff := cmp.Diff(tt.expectContent, buf.Bytes()); diff != "" {
-				t.Errorf("content mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-func TestDownloader_GetOutputBlockURL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
 		name        string
 		header      *v1.ActionsCache
 		setupMock   func(*mockDownloadClient)
@@ -590,6 +410,244 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			}
 			if diff := cmp.Diff(tt.expectSize, size); diff != "" {
 				t.Errorf("size mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+type mockWriteCloser struct {
+	bytes.Buffer
+	closed bool
+}
+
+func (m *mockWriteCloser) Close() error {
+	m.closed = true
+	return nil
+}
+
+func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("testdata12")
+	compressedData, err := zstd.Compress(nil, data)
+	if err != nil {
+		t.Fatalf("compress data: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		header      *v1.ActionsCache
+		setupMock   func(*mockDownloadClient, int64) error
+		writerError bool
+		expectData  map[string][]byte
+		expectError bool
+	}{
+		{
+			name: "success with single output",
+			header: &v1.ActionsCache{
+				Outputs: map[string]*v1.ActionsOutput{
+					"test": {
+						Offset:      0,
+						Size:        10,
+						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+					},
+				},
+				OutputTotalSize: 10,
+			},
+			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+				data := []byte("testdata12")
+				client.expectDownloadBlock(headerSize, int64(10), data, nil)
+				return nil
+			},
+			expectData: map[string][]byte{
+				"test": []byte("testdata12"),
+			},
+		},
+		{
+			name: "success with multiple outputs",
+			header: &v1.ActionsCache{
+				Outputs: map[string]*v1.ActionsOutput{
+					"test1": {
+						Offset:      0,
+						Size:        10,
+						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+					},
+					"test2": {
+						Offset:      10,
+						Size:        10,
+						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+					},
+				},
+				OutputTotalSize: 20,
+			},
+			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+				data := []byte("testdata12testdata34")
+				client.expectDownloadBlock(headerSize, int64(20), data, nil)
+				return nil
+			},
+			expectData: map[string][]byte{
+				"test1": []byte("testdata12"),
+				"test2": []byte("testdata34"),
+			},
+		},
+		{
+			name: "success with zstd compression",
+			header: &v1.ActionsCache{
+				Outputs: map[string]*v1.ActionsOutput{
+					"test": {
+						Offset:      0,
+						Size:        int64(len(compressedData)),
+						Compression: v1.Compression_COMPRESSION_ZSTD,
+					},
+				},
+				OutputTotalSize: 10,
+			},
+			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+				client.expectDownloadBlock(headerSize, int64(len(compressedData)), compressedData, nil)
+				return nil
+			},
+			expectData: map[string][]byte{
+				"test": []byte("testdata12"),
+			},
+		},
+		{
+			name: "unsupported compression",
+			header: &v1.ActionsCache{
+				Outputs: map[string]*v1.ActionsOutput{
+					"test": {
+						Offset:      0,
+						Size:        10,
+						Compression: v1.Compression(100),
+					},
+				},
+				OutputTotalSize: 10,
+			},
+			expectData: map[string][]byte{
+				"test": []byte("testdata12"),
+			},
+			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+				data := []byte("testdata12")
+				client.expectDownloadBlock(headerSize, int64(10), data, nil)
+				return nil
+			},
+		},
+		{
+			name: "writer error",
+			header: &v1.ActionsCache{
+				Outputs: map[string]*v1.ActionsOutput{
+					"test": {
+						Offset:      0,
+						Size:        10,
+						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+					},
+				},
+				OutputTotalSize: 10,
+			},
+			writerError: true,
+			expectError: true,
+		},
+		{
+			name: "download error",
+			header: &v1.ActionsCache{
+				Outputs: map[string]*v1.ActionsOutput{
+					"test": {
+						Offset:      0,
+						Size:        10,
+						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+					},
+				},
+				OutputTotalSize: 10,
+			},
+			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+				client.expectDownloadBlock(headerSize, int64(10), nil, errors.New("download error"))
+				return nil
+			},
+			expectError: true,
+		},
+		{
+			name: "empty outputs",
+			header: &v1.ActionsCache{
+				Outputs:         map[string]*v1.ActionsOutput{},
+				OutputTotalSize: 0,
+			},
+			expectData: map[string][]byte{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &mockDownloadClient{}
+			headerBytes, err := proto.Marshal(tt.header)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			sizeBuf := make([]byte, 8)
+			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
+			headerSize := int64(8 + len(headerBytes))
+
+			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
+			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+
+			if tt.setupMock != nil {
+				err := tt.setupMock(client, headerSize)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			downloader, err := NewDownloader(t.Context(), client)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			writers := make(map[string]*mockWriteCloser)
+			err = downloader.DownloadAllOutputBlocks(t.Context(), func(objectID string) (io.WriteCloser, error) {
+				if tt.writerError {
+					return nil, errors.New("writer error")
+				}
+				w := &mockWriteCloser{}
+				writers[objectID] = w
+				return w, nil
+			})
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Check that all writers were closed
+			for id, w := range writers {
+				if !w.closed {
+					t.Errorf("writer for %s not closed", id)
+				}
+			}
+
+			// Check that expected data was received
+			for id, expected := range tt.expectData {
+				w, ok := writers[id]
+				if !ok {
+					t.Errorf("missing writer for %s", id)
+					continue
+				}
+				if diff := cmp.Diff(expected, w.Bytes()); diff != "" {
+					t.Errorf("content mismatch for %s (-want +got):\n%s", id, diff)
+				}
+			}
+
+			// Check that there are no unexpected writers
+			for id := range writers {
+				if _, ok := tt.expectData[id]; !ok {
+					t.Errorf("unexpected writer for %s", id)
+				}
 			}
 		})
 	}

@@ -115,27 +115,37 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 		chunkSize := int64(0)
 		chunkWriters := []myio.WriterWithSize{}
 		chunkCloseFuncs := []func() error{}
-		for j := i; j < len(outputs) && chunkSize < maxChunkSize; j++ {
-			offset += outputs[j].output.Size
-			chunkSize += outputs[j].output.Size
+		for ; i < len(outputs) && chunkSize < maxChunkSize; i++ {
+			output := outputs[i]
+			offset += output.output.Size
+			chunkSize += output.output.Size
 
 			err := s.Acquire(ctx, 1)
 			if err != nil {
 				return fmt.Errorf("acquire semaphore: %w", err)
 			}
 
-			w, err := objectWriterFunc(outputs[j].blobID)
+			w, err := objectWriterFunc(outputs[i].blobID)
 			if err != nil {
 				return fmt.Errorf("get object writer: %w", err)
 			}
 			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 
+			switch output.output.Compression {
+			case v1.Compression_COMPRESSION_ZSTD:
+				w = zstd.NewDecompressWriter(w)
+				chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
+			case v1.Compression_COMPRESSION_UNSPECIFIED:
+			default:
+			}
+
 			chunkWriters = append(chunkWriters, myio.WriterWithSize{
 				Writer: w,
-				Size:   outputs[j].output.Size,
+				Size:   outputs[i].output.Size,
 			})
 		}
 
+		slices.Reverse(chunkCloseFuncs)
 		eg.Go(func() error {
 			defer s.Release(int64(len(chunkWriters)))
 			defer func() {
