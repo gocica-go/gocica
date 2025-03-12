@@ -73,15 +73,17 @@ func NewGitHubActionsCache(
 		return nil, fmt.Errorf("setup uploader: %w", err)
 	}
 
-	// Download all output blocks in the background.
-	go func() {
-		if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
-			_, w, err := localBackend.Put(ctx, objectID, 0)
-			return w, err
-		}); err != nil {
-			logger.Errorf("download all output blocks: %v", err)
-		}
-	}()
+	if c.downloader != nil {
+		// Download all output blocks in the background.
+		go func() {
+			if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
+				_, w, err := localBackend.Put(ctx, objectID, 0)
+				return w, err
+			}); err != nil {
+				logger.Errorf("download all output blocks: %v", err)
+			}
+		}()
+	}
 
 	logger.Infof("GitHub Actions cache backend initialized.")
 
