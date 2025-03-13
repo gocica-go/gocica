@@ -88,11 +88,6 @@ type outputPair struct {
 	output *v1.ActionsOutput
 }
 
-type chunkBlob struct {
-	blobID string
-	size   int64
-}
-
 const maxChunkSize = 4 * (1 << 20)
 
 // openFileLimit is the maximum number of files that can be opened at the same time.
@@ -162,7 +157,9 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 			defer s.Release(int64(len(chunkWriters)))
 			defer func() {
 				for _, closeFunc := range chunkCloseFuncs {
-					closeFunc()
+					if err := closeFunc(); err != nil {
+						d.logger.Errorf("close object writer: %v", err)
+					}
 				}
 			}()
 

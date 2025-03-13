@@ -66,7 +66,7 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 
 var ErrSizeMismatch = errors.New("size mismatch")
 
-func (d *Disk) Put(_ context.Context, outputID string, size int64) (string, io.WriteCloser, error) {
+func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.WriteCloser, error) {
 	outputFilePath := d.objectFilePath(outputID)
 
 	var f *os.File
