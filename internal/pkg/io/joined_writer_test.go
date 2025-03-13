@@ -10,7 +10,7 @@ type errorWriter struct {
 	err error
 }
 
-func (w *errorWriter) Write(p []byte) (n int, err error) {
+func (w *errorWriter) Write([]byte) (n int, err error) {
 	return 0, w.err
 }
 
@@ -134,8 +134,15 @@ func TestJoinedWriter(t *testing.T) {
 			n, err := jw.Write(tt.data)
 
 			// Assert results
-			if err != tt.expectedErr {
-				t.Errorf("expected error %v, got %v", tt.expectedErr, err)
+			if tt.expectedErr == nil {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else {
+				if err.Error() != tt.expectedErr.Error() {
+					t.Errorf("expected error %v, got %v", tt.expectedErr, err)
+				}
+				return
 			}
 
 			if n != tt.expectedN {
