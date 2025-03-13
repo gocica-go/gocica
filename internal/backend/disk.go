@@ -91,6 +91,7 @@ func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.Writ
 			l.Lock()
 			d.objectMap[outputID] = l
 		}
+		d.logger.Debugf("lock acquired outputID=%s", outputID)
 	}()
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
