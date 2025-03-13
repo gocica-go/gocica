@@ -157,6 +157,7 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 		}
 
 		slices.Reverse(chunkCloseFuncs)
+		j := i
 		eg.Go(func() error {
 			defer s.Release(int64(len(chunkWriters)))
 			defer func() {
@@ -167,12 +168,12 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
-			d.logger.Debugf("downloading chunk: %d/%d", i, len(outputs))
+			d.logger.Debugf("downloading chunk: %d/%d", j, len(outputs))
 			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
 				return fmt.Errorf("download block: %w", err)
 			}
 
-			d.logger.Debugf("downloaded chunk: %d/%d", i, len(outputs))
+			d.logger.Debugf("downloaded chunk: %d/%d", j, len(outputs))
 
 			return nil
 		})
