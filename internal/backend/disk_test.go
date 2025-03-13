@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -18,7 +17,7 @@ func TestNewDisk(t *testing.T) {
 	tests := []struct {
 		name          string
 		wantErr       bool
-		wantObjectMap map[string]*sync.RWMutex
+		wantObjectMap map[string]*objectLocker
 		setup         func(t *testing.T) string
 	}{
 		{
@@ -26,7 +25,7 @@ func TestNewDisk(t *testing.T) {
 			setup: func(t *testing.T) string {
 				return t.TempDir()
 			},
-			wantObjectMap: map[string]*sync.RWMutex{},
+			wantObjectMap: map[string]*objectLocker{},
 		},
 		{
 			name:    "error on directory creation",

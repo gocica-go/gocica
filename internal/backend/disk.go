@@ -23,7 +23,7 @@ type Disk struct {
 	rootPath string
 
 	objectMapLocker sync.RWMutex
-	objectMap       map[string]*sync.RWMutex
+	objectMap       map[string]*objectLocker
 }
 
 func NewDisk(logger log.Logger, dir string) (*Disk, error) {
@@ -37,15 +37,20 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 	disk := &Disk{
 		logger:    logger,
 		rootPath:  dir,
-		objectMap: map[string]*sync.RWMutex{},
+		objectMap: map[string]*objectLocker{},
 	}
 
 	return disk, nil
 }
 
+type objectLocker struct {
+	l  sync.RWMutex
+	ok bool
+}
+
 func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err error) {
 	var (
-		l  *sync.RWMutex
+		l  *objectLocker
 		ok bool
 	)
 	func() {
@@ -58,9 +63,12 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 	}
 
 	d.logger.Debugf("read lock waiting outputID=%s", outputID)
-	l.RLock()
-	defer l.RUnlock()
+	l.l.RLock()
+	defer l.l.RUnlock()
 	d.logger.Debugf("read lock acquired outputID=%s", outputID)
+	if !l.ok {
+		return "", nil
+	}
 	return d.objectFilePath(outputID), nil
 }
 
@@ -76,28 +84,26 @@ func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.Writ
 	}
 
 	d.logger.Debugf("output file created: path=%s", outputFilePath)
-	var l *sync.RWMutex
+	var l *objectLocker
 	func() {
 		d.objectMapLocker.Lock()
 		defer d.objectMapLocker.Unlock()
 		var ok bool
 		l, ok = d.objectMap[outputID]
-		if ok {
-			d.logger.Debugf("lock already exist outputID=%s", outputID)
-			l.Lock()
-		} else {
-			d.logger.Debugf("lock created outputID=%s", outputID)
-			l = &sync.RWMutex{}
-			l.Lock()
+		if !ok {
+			l = &objectLocker{}
 			d.objectMap[outputID] = l
 		}
-		d.logger.Debugf("lock acquired outputID=%s", outputID)
 	}()
+	d.logger.Debugf("write lock waiting outputID=%s", outputID)
+	l.l.Lock()
+	d.logger.Debugf("write lock acquired outputID=%s", outputID)
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
 		unlock: func() {
 			d.logger.Debugf("lock released outputID=%s", outputID)
-			l.Unlock()
+			l.ok = true
+			l.l.Unlock()
 		},
 	}
 
