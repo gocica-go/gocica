@@ -114,7 +114,7 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 	s := semaphore.NewWeighted(openFileLimit)
 	offset := d.headerSize
 	for i := 0; i < len(outputs); {
-		d.logger.Debugf("downloading chunk: %d/%d", i, len(outputs))
+		d.logger.Debugf("creating chunk: %d", i)
 		chunkOffset := offset
 		chunkSize := int64(0)
 		chunkWriters := []myio.WriterWithSize{}

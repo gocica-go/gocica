@@ -21,7 +21,7 @@ const (
 func NewLogger(level Level) *Logger {
 	return &Logger{
 		level:  level,
-		logger: log.New(os.Stderr, "GoCICa: ", log.LstdFlags),
+		logger: log.New(os.Stderr, "GoCICa: ", log.LstdFlags|log.Lmicroseconds),
 	}
 }
 
