@@ -158,6 +158,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	u.outputsLocker.Lock()
 	defer u.outputsLocker.Unlock()
 	u.outputs = append(u.outputs, &v1.ActionsOutput{
+		Id:          outputID,
 		Size:        uploadSize,
 		Compression: compression,
 	})
