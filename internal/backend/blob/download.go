@@ -114,6 +114,7 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 	s := semaphore.NewWeighted(openFileLimit)
 	offset := d.headerSize
 	for i := 0; i < len(outputs); {
+		d.logger.Debugf("downloading chunk: %d/%d", i, len(outputs))
 		chunkOffset := offset
 		chunkSize := int64(0)
 		chunkWriters := []myio.WriterWithSize{}
@@ -123,10 +124,14 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 			offset += output.output.Size
 			chunkSize += output.output.Size
 
+			d.logger.Debugf("acquiring semaphore: %d", i)
+
 			err := s.Acquire(ctx, 1)
 			if err != nil {
 				return fmt.Errorf("acquire semaphore: %w", err)
 			}
+
+			d.logger.Debugf("creating object writer: %d", i)
 
 			w, err := objectWriterFunc(ctx, outputs[i].blobID)
 			if err != nil {
@@ -136,10 +141,13 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 			switch output.output.Compression {
 			case v1.Compression_COMPRESSION_ZSTD:
+				d.logger.Debugf("creating decompress writer: %d", i)
 				w = zstd.NewDecompressWriter(w)
 				chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 			case v1.Compression_COMPRESSION_UNSPECIFIED:
+				fallthrough
 			default:
+				d.logger.Debugf("creating raw writer: %d", i)
 			}
 
 			chunkWriters = append(chunkWriters, myio.WriterWithSize{
@@ -159,9 +167,12 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
+			d.logger.Debugf("downloading chunk: %d/%d", i, len(outputs))
 			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
 				return fmt.Errorf("download block: %w", err)
 			}
+
+			d.logger.Debugf("downloaded chunk: %d/%d", i, len(outputs))
 
 			return nil
 		})

@@ -57,8 +57,10 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 		return "", nil
 	}
 
+	d.logger.Debugf("read lock waiting outputID=%s", outputID)
 	l.RLock()
 	defer l.RUnlock()
+	d.logger.Debugf("read lock acquired outputID=%s", outputID)
 	return d.objectFilePath(outputID), nil
 }
 
@@ -73,6 +75,7 @@ func (d *Disk) Put(_ context.Context, outputID string, size int64) (string, io.W
 		return "", nil, fmt.Errorf("create output file: %w", err)
 	}
 
+	d.logger.Debugf("output file created: path=%s", outputFilePath)
 	var l *sync.RWMutex
 	func() {
 		d.objectMapLocker.Lock()
@@ -80,8 +83,10 @@ func (d *Disk) Put(_ context.Context, outputID string, size int64) (string, io.W
 		var ok bool
 		l, ok = d.objectMap[outputID]
 		if ok {
+			d.logger.Debugf("lock already exist outputID=%s", outputID)
 			l.Lock()
 		} else {
+			d.logger.Debugf("lock created outputID=%s", outputID)
 			l = &sync.RWMutex{}
 			l.Lock()
 			d.objectMap[outputID] = l
@@ -89,7 +94,10 @@ func (d *Disk) Put(_ context.Context, outputID string, size int64) (string, io.W
 	}()
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
-		unlock:      l.Unlock,
+		unlock: func() {
+			d.logger.Debugf("lock released outputID=%s", outputID)
+			l.Unlock()
+		},
 	}
 
 	return outputFilePath, wrapped, nil
