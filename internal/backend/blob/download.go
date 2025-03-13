@@ -10,12 +10,14 @@ import (
 	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 )
 
 type Downloader struct {
+	logger     log.Logger
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
@@ -27,8 +29,9 @@ type DownloadClient interface {
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
 
-func NewDownloader(ctx context.Context, client DownloadClient) (*Downloader, error) {
+func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
 	downloader := &Downloader{
+		logger: logger,
 		client: client,
 	}
 

@@ -113,7 +113,7 @@ func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error
 		return "", fmt.Errorf("create download client: %w", err)
 	}
 
-	c.downloader, err = blob.NewDownloader(ctx, blob.NewAzureDownloadClient(downloadClient))
+	c.downloader, err = blob.NewDownloader(ctx, c.logger, blob.NewAzureDownloadClient(downloadClient))
 	if err != nil {
 		return "", fmt.Errorf("create downloader: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/DataDog/zstd"
 	"github.com/google/go-cmp/cmp"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/log"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 )
@@ -203,7 +204,7 @@ func TestNewDownloader(t *testing.T) {
 
 			_ = tt.setupMock(client, header)
 
-			downloader, err := NewDownloader(t.Context(), client)
+			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -302,7 +303,7 @@ func TestDownloader_GetEntries(t *testing.T) {
 			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
 			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
 
-			downloader, err := NewDownloader(t.Context(), client)
+			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -386,7 +387,7 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 				tt.setupMock(client)
 			}
 
-			downloader, err := NewDownloader(t.Context(), client)
+			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -599,7 +600,7 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 				}
 			}
 
-			downloader, err := NewDownloader(t.Context(), client)
+			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
 			if err != nil {
 				t.Fatal(err)
 			}
