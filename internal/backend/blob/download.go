@@ -119,14 +119,14 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 			offset += output.output.Size
 			chunkSize += output.output.Size
 
-			d.logger.Debugf("acquiring semaphore: %d", i)
+			d.logger.Debugf("acquiring semaphore(%d): outputID=%s", i, output.blobID)
 
 			err := s.Acquire(ctx, 1)
 			if err != nil {
 				return fmt.Errorf("acquire semaphore: %w", err)
 			}
 
-			d.logger.Debugf("creating object writer: %d", i)
+			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.blobID)
 
 			w, err := objectWriterFunc(ctx, outputs[i].blobID)
 			if err != nil {
@@ -136,13 +136,13 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 			switch output.output.Compression {
 			case v1.Compression_COMPRESSION_ZSTD:
-				d.logger.Debugf("creating decompress writer: %d", i)
+				d.logger.Debugf("creating decompress writer(%d): outputID=%s", i, output.blobID)
 				w = zstd.NewDecompressWriter(w)
 				chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 			case v1.Compression_COMPRESSION_UNSPECIFIED:
 				fallthrough
 			default:
-				d.logger.Debugf("creating raw writer: %d", i)
+				d.logger.Debugf("creating raw writer(%d): outputID=%s", i, output.blobID)
 			}
 
 			chunkWriters = append(chunkWriters, myio.WriterWithSize{
