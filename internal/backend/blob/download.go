@@ -179,6 +179,8 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 		})
 	}
 
+	d.logger.Debugf("waiting for all chunks")
+
 	if err := eg.Wait(); err != nil {
 		return err
 	}
