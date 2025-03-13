@@ -194,8 +194,9 @@ func TestNewDownloader(t *testing.T) {
 						Size:     100,
 					},
 				},
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:     "test",
 						Offset: 0,
 						Size:   100,
 					},
@@ -446,8 +447,9 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "success with single output",
 			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:          "test",
 						Offset:      0,
 						Size:        10,
 						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
@@ -467,13 +469,15 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "success with multiple outputs",
 			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test1": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:          "test1",
 						Offset:      0,
 						Size:        10,
 						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
 					},
-					"test2": {
+					{
+						Id:          "test2",
 						Offset:      10,
 						Size:        10,
 						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
@@ -494,8 +498,9 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "success with zstd compression",
 			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:          "test",
 						Offset:      0,
 						Size:        int64(len(compressedData)),
 						Compression: v1.Compression_COMPRESSION_ZSTD,
@@ -514,8 +519,9 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "unsupported compression",
 			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:          "test",
 						Offset:      0,
 						Size:        10,
 						Compression: v1.Compression(100),
@@ -535,8 +541,9 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "writer error",
 			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:          "test",
 						Offset:      0,
 						Size:        10,
 						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
@@ -550,8 +557,9 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "download error",
 			header: &v1.ActionsCache{
-				Outputs: map[string]*v1.ActionsOutput{
-					"test": {
+				Outputs: []*v1.ActionsOutput{
+					{
+						Id:          "test",
 						Offset:      0,
 						Size:        10,
 						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
@@ -568,7 +576,7 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		{
 			name: "empty outputs",
 			header: &v1.ActionsCache{
-				Outputs:         map[string]*v1.ActionsOutput{},
+				Outputs:         []*v1.ActionsOutput{},
 				OutputTotalSize: 0,
 			},
 			expectData: map[string][]byte{},

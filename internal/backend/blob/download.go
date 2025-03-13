@@ -71,7 +71,7 @@ func (d *Downloader) GetEntries(context.Context) (metadata map[string]*v1.IndexE
 	return d.header.Entries, nil
 }
 
-func (d *Downloader) GetOutputs(context.Context) (outputs map[string]*v1.ActionsOutput, err error) {
+func (d *Downloader) GetOutputs(context.Context) (outputs []*v1.ActionsOutput, err error) {
 	return d.header.Outputs, nil
 }
 
@@ -83,11 +83,6 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 	return url, offset, size, nil
 }
 
-type outputPair struct {
-	blobID string
-	output *v1.ActionsOutput
-}
-
 const maxChunkSize = 4 * (1 << 20)
 
 // openFileLimit is the maximum number of files that can be opened at the same time.
@@ -95,13 +90,9 @@ const maxChunkSize = 4 * (1 << 20)
 const openFileLimit = 100000
 
 func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
-	outputs := make([]outputPair, 0, len(d.header.Outputs))
-	for blobID, output := range d.header.Outputs {
-		outputs = append(outputs, outputPair{blobID: blobID, output: output})
-	}
-
-	slices.SortFunc(outputs, func(x, y outputPair) int {
-		return int(x.output.Offset - y.output.Offset)
+	outputs := d.header.Outputs
+	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
+		return int(x.Offset - y.Offset)
 	})
 
 	eg := errgroup.Group{}
@@ -116,38 +107,38 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 		chunkCloseFuncs := []func() error{}
 		for ; i < len(outputs) && chunkSize < maxChunkSize; i++ {
 			output := outputs[i]
-			offset += output.output.Size
-			chunkSize += output.output.Size
+			offset += output.Size
+			chunkSize += output.Size
 
-			d.logger.Debugf("acquiring semaphore(%d): outputID=%s", i, output.blobID)
+			d.logger.Debugf("acquiring semaphore(%d): outputID=%s", i, output.Id)
 
 			err := s.Acquire(ctx, 1)
 			if err != nil {
 				return fmt.Errorf("acquire semaphore: %w", err)
 			}
 
-			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.blobID)
+			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.Id)
 
-			w, err := objectWriterFunc(ctx, outputs[i].blobID)
+			w, err := objectWriterFunc(ctx, outputs[i].Id)
 			if err != nil {
 				return fmt.Errorf("get object writer: %w", err)
 			}
 			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 
-			switch output.output.Compression {
+			switch output.Compression {
 			case v1.Compression_COMPRESSION_ZSTD:
-				d.logger.Debugf("creating decompress writer(%d): outputID=%s", i, output.blobID)
+				d.logger.Debugf("creating decompress writer(%d): outputID=%s", i, output.Id)
 				w = zstd.NewDecompressWriter(w)
 				chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 			case v1.Compression_COMPRESSION_UNSPECIFIED:
 				fallthrough
 			default:
-				d.logger.Debugf("creating raw writer(%d): outputID=%s", i, output.blobID)
+				d.logger.Debugf("creating raw writer(%d): outputID=%s", i, output.Id)
 			}
 
 			chunkWriters = append(chunkWriters, myio.WriterWithSize{
 				Writer: w,
-				Size:   outputs[i].output.Size,
+				Size:   outputs[i].Size,
 			})
 		}
 

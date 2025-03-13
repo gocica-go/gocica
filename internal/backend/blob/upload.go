@@ -22,11 +22,11 @@ import (
 var compressGauge = metrics.NewGauge("blob_compress_latency")
 
 type Uploader struct {
-	logger              log.Logger
-	client              UploadClient
-	outputSizeMapLocker sync.RWMutex
-	outputSizeMap       map[string]*v1.ActionsOutput
-	waitBaseFunc        waitBaseFunc
+	logger        log.Logger
+	client        UploadClient
+	outputsLocker sync.RWMutex
+	outputs       []*v1.ActionsOutput
+	waitBaseFunc  waitBaseFunc
 }
 
 type UploadClient interface {
@@ -36,17 +36,16 @@ type UploadClient interface {
 }
 
 type BaseBlobProvider interface {
-	GetOutputs(ctx context.Context) (outputs map[string]*v1.ActionsOutput, err error)
+	GetOutputs(ctx context.Context) (outputs []*v1.ActionsOutput, err error)
 	GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error)
 }
 
-type waitBaseFunc func() (baseBlockID string, baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput, err error)
+type waitBaseFunc func() (baseBlockID string, baseOutputSize int64, baseOutputs []*v1.ActionsOutput, err error)
 
 func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
 	uploader := &Uploader{
-		logger:        logger,
-		client:        client,
-		outputSizeMap: map[string]*v1.ActionsOutput{},
+		logger: logger,
+		client: client,
 	}
 
 	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
@@ -64,8 +63,8 @@ func (u *Uploader) generateBlockID() (string, error) {
 
 func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	if baseBlobProvider == nil {
-		return func() (string, int64, map[string]*v1.ActionsOutput, error) {
-			return "", 0, map[string]*v1.ActionsOutput{}, nil
+		return func() (string, int64, []*v1.ActionsOutput, error) {
+			return "", 0, nil, nil
 		}
 	}
 
@@ -96,7 +95,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 		return nil
 	})
 
-	var baseOutputs map[string]*v1.ActionsOutput
+	var baseOutputs []*v1.ActionsOutput
 	eg.Go(func() error {
 		var err error
 		baseOutputs, err = baseBlobProvider.GetOutputs(ctx)
@@ -107,7 +106,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 		return nil
 	})
 
-	return func() (string, int64, map[string]*v1.ActionsOutput, error) {
+	return func() (string, int64, []*v1.ActionsOutput, error) {
 		if err := eg.Wait(); err != nil {
 			return "", 0, nil, err
 		}
@@ -156,44 +155,48 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 		}
 	}
 
-	u.outputSizeMapLocker.Lock()
-	defer u.outputSizeMapLocker.Unlock()
-	u.outputSizeMap[outputID] = &v1.ActionsOutput{
+	u.outputsLocker.Lock()
+	defer u.outputsLocker.Unlock()
+	u.outputs = append(u.outputs, &v1.ActionsOutput{
 		Size:        uploadSize,
 		Compression: compression,
-	}
+	})
 
 	return nil
 }
 
-func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs map[string]*v1.ActionsOutput) ([]string, map[string]*v1.ActionsOutput, int64) {
-	var outputSizeMap map[string]*v1.ActionsOutput
+func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs []*v1.ActionsOutput) ([]string, []*v1.ActionsOutput, int64) {
+	var newOutputs []*v1.ActionsOutput
 	func() {
-		u.outputSizeMapLocker.RLock()
-		defer u.outputSizeMapLocker.RUnlock()
-		outputSizeMap = u.outputSizeMap
+		u.outputsLocker.RLock()
+		defer u.outputsLocker.RUnlock()
+		newOutputs = u.outputs
 	}()
 
+	outputMap := make(map[string]struct{}, len(newOutputs)+len(baseOutputs))
+	for _, output := range baseOutputs {
+		outputMap[output.Id] = struct{}{}
+	}
 	outputs := baseOutputs
 	offset := baseOutputSize
-	newOutputIDs := make([]string, 0, len(outputSizeMap))
-	for outputID, output := range outputSizeMap {
-		if _, ok := baseOutputs[outputID]; ok {
+	newOutputIDs := make([]string, 0, len(newOutputs))
+	for _, output := range newOutputs {
+		if _, ok := outputMap[output.Id]; ok {
 			continue
 		}
 
+		outputMap[output.Id] = struct{}{}
 		output.Offset = offset
-		outputs[outputID] = output
 		offset += output.Size
 		if output.Size != 0 {
-			newOutputIDs = append(newOutputIDs, outputID)
+			newOutputIDs = append(newOutputIDs, output.Id)
 		}
 	}
 
 	return newOutputIDs, outputs, offset
 }
 
-func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs map[string]*v1.ActionsOutput, outputSize int64) ([]byte, error) {
+func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1.ActionsOutput, outputSize int64) ([]byte, error) {
 	actionsCache := &v1.ActionsCache{
 		Entries:         entries,
 		Outputs:         outputs,

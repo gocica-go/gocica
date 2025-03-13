@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -143,13 +143,13 @@ type mockBaseBlobProvider struct {
 	calls []mockCall
 }
 
-func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) (map[string]*v1.ActionsOutput, error) {
+func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) ([]*v1.ActionsOutput, error) {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "DownloadOutputs" {
-			outputs := make(map[string]*v1.ActionsOutput)
+			outputs := []*v1.ActionsOutput{}
 			if call.result[0] != nil {
-				if out, ok := call.result[0].(map[string]*v1.ActionsOutput); ok {
+				if out, ok := call.result[0].([]*v1.ActionsOutput); ok {
 					outputs = out
 				}
 			}
@@ -191,7 +191,7 @@ func (m *mockBaseBlobProvider) expectGetOutputBlockURL(url string, offset, size 
 	})
 }
 
-func (m *mockBaseBlobProvider) expectDownloadOutputs(outputs map[string]*v1.ActionsOutput, err error) {
+func (m *mockBaseBlobProvider) expectDownloadOutputs(outputs []*v1.ActionsOutput, err error) {
 	m.calls = append(m.calls, mockCall{
 		method: "DownloadOutputs",
 		result: []any{outputs, err},
@@ -221,7 +221,7 @@ func TestNewUploader(t *testing.T) {
 				offset := int64(100)
 				size := int64(200)
 				provider.expectGetOutputBlockURL("test-url", offset, size, nil)
-				provider.expectDownloadOutputs(map[string]*v1.ActionsOutput{}, nil)
+				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
 				client.expectUploadBlockFromURL(offset, size, nil)
 			},
 			checkBaseFunc:    true,
@@ -232,7 +232,7 @@ func TestNewUploader(t *testing.T) {
 			name: "GetOutputBlockURL error",
 			mockSetup: func(_ *mockUploadClient, provider *mockBaseBlobProvider) {
 				provider.expectGetOutputBlockURL("", 0, 0, errors.New("get url error"))
-				provider.expectDownloadOutputs(map[string]*v1.ActionsOutput{}, nil)
+				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
 			},
 			checkBaseFunc: true,
 			expectError:   true,
@@ -254,7 +254,7 @@ func TestNewUploader(t *testing.T) {
 				offset := int64(100)
 				size := int64(200)
 				provider.expectGetOutputBlockURL("test-url", offset, size, nil)
-				provider.expectDownloadOutputs(map[string]*v1.ActionsOutput{}, nil)
+				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
 				client.expectUploadBlockFromURL(offset, size, errors.New("upload error"))
 			},
 			checkBaseFunc: true,
@@ -389,8 +389,9 @@ func TestUploader_UploadOutput(t *testing.T) {
 func TestUploader_Commit(t *testing.T) {
 	t.Parallel()
 
-	baseOutputs := map[string]*v1.ActionsOutput{
-		"base": {
+	baseOutputs := []*v1.ActionsOutput{
+		{
+			Id:     "base",
 			Offset: 0,
 			Size:   50,
 		},
@@ -415,7 +416,7 @@ func TestUploader_Commit(t *testing.T) {
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
 				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(maps.Clone(baseOutputs), nil)
+				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
@@ -434,28 +435,34 @@ func TestUploader_Commit(t *testing.T) {
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
 				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(maps.Clone(baseOutputs), nil)
+				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
 
 				uploader := NewUploader(ctx, log.DefaultLogger, client, provider)
-				uploader.outputSizeMap["new-output"] = &v1.ActionsOutput{
-					Offset:      100,
-					Size:        150,
-					Compression: v1.Compression_COMPRESSION_ZSTD,
+				uploader.outputs = []*v1.ActionsOutput{
+					{
+						Id:          "new-output",
+						Offset:      100,
+						Size:        150,
+						Compression: v1.Compression_COMPRESSION_ZSTD,
+					},
 				}
 				return uploader
 			},
 			validateState: func(t *testing.T, u *Uploader) {
-				u.outputSizeMapLocker.RLock()
-				defer u.outputSizeMapLocker.RUnlock()
-				if diff := cmp.Diff(&v1.ActionsOutput{
-					Offset:      100,
-					Size:        150,
-					Compression: v1.Compression_COMPRESSION_ZSTD,
-				}, u.outputSizeMap["new-output"], cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
-					t.Errorf("outputSizeMap mismatch (-want +got):\n%s", diff)
+				u.outputsLocker.RLock()
+				defer u.outputsLocker.RUnlock()
+				if diff := cmp.Diff([]*v1.ActionsOutput{
+					{
+						Id:          "new-output",
+						Offset:      100,
+						Size:        150,
+						Compression: v1.Compression_COMPRESSION_ZSTD,
+					},
+				}, u.outputs, cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
+					t.Errorf("outputs mismatch (-want +got):\n%s", diff)
 				}
 			},
 		},
@@ -471,7 +478,7 @@ func TestUploader_Commit(t *testing.T) {
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
 				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(maps.Clone(baseOutputs), nil)
+				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(errors.New("commit error"))
@@ -515,7 +522,7 @@ func TestUploader_createHeader(t *testing.T) {
 	tests := []struct {
 		name           string
 		entries        map[string]*v1.IndexEntry
-		outputs        map[string]*v1.ActionsOutput
+		outputs        []*v1.ActionsOutput
 		outputSize     int64
 		expectError    bool
 		validateHeader func(*testing.T, []byte)
@@ -530,8 +537,9 @@ func TestUploader_createHeader(t *testing.T) {
 					LastUsedAt: timestamppb.Now(),
 				},
 			},
-			outputs: map[string]*v1.ActionsOutput{
-				"test": {
+			outputs: []*v1.ActionsOutput{
+				{
+					Id:     "test",
 					Offset: 0,
 					Size:   100,
 				},
@@ -559,11 +567,16 @@ func TestUploader_createHeader(t *testing.T) {
 				if diff := cmp.Diff("test", header.Entries["test"].OutputId, protocmp.Transform()); diff != "" {
 					t.Errorf("entry OutputId mismatch (-want +got):\n%s", diff)
 				}
-				if diff := cmp.Diff(int64(0), header.Outputs["test"].Offset); diff != "" {
-					t.Errorf("output Offset mismatch (-want +got):\n%s", diff)
-				}
-				if diff := cmp.Diff(int64(100), header.Outputs["test"].Size); diff != "" {
-					t.Errorf("output Size mismatch (-want +got):\n%s", diff)
+
+				if diff := cmp.Diff([]*v1.ActionsOutput{
+					{
+						Id:          "test",
+						Offset:      0,
+						Size:        100,
+						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+					},
+				}, header.Outputs, cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
+					t.Errorf("outputs mismatch (-want +got):\n%s", diff)
 				}
 				if diff := cmp.Diff(int64(100), header.OutputTotalSize); diff != "" {
 					t.Errorf("output total size mismatch (-want +got):\n%s", diff)
