@@ -121,9 +121,13 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 		reader      io.ReadSeeker
 		compression v1.Compression
 	)
-	if size > 500*(2^10) {
+	if size > 100*(1<<10) {
+		compressionLevel := 1
+		if size > 1*(1<<30) {
+			compressionLevel = 10
+		}
 		buf := bytes.NewBuffer(nil)
-		zw := zstd.NewWriterLevel(buf, 10)
+		zw := zstd.NewWriterLevel(buf, compressionLevel)
 
 		var err error
 		compressGauge.Stopwatch(func() {
