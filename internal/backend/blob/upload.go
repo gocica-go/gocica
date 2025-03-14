@@ -123,7 +123,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	)
 	if size > 100*(2^10) {
 		buf := bytes.NewBuffer(nil)
-		zw := zstd.NewWriterLevel(buf, 1)
+		zw := zstd.NewWriterLevel(buf, 10)
 
 		var err error
 		compressGauge.Stopwatch(func() {
