@@ -3,6 +3,7 @@ package io
 import (
 	"bytes"
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -12,6 +13,27 @@ type errorWriter struct {
 
 func (w *errorWriter) Write([]byte) (n int, err error) {
 	return 0, w.err
+}
+
+func (w *errorWriter) Close() error {
+	return nil
+}
+
+type bufferCloser struct {
+	*bytes.Buffer
+	closed bool
+}
+
+func newBufferCloser() *bufferCloser {
+	return &bufferCloser{
+		Buffer: &bytes.Buffer{},
+		closed: false,
+	}
+}
+
+func (b *bufferCloser) Close() error {
+	b.closed = true
+	return nil
 }
 
 func TestJoinedWriter(t *testing.T) {
@@ -113,14 +135,14 @@ func TestJoinedWriter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup test writers and buffers
 			var writers []WriterWithSize
-			buffers := make([]*bytes.Buffer, len(tt.writers))
+			buffers := make([]*bufferCloser, len(tt.writers))
 
 			for i, w := range tt.writers {
-				var writer interface{ Write([]byte) (int, error) }
+				var writer io.WriteCloser
 				if w.isErr {
 					writer = &errorWriter{err: tt.expectedErr}
 				} else {
-					buffers[i] = &bytes.Buffer{}
+					buffers[i] = newBufferCloser()
 					writer = buffers[i]
 				}
 				writers = append(writers, WriterWithSize{

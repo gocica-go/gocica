@@ -147,9 +147,11 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 		eg.Go(func() error {
 			defer s.Release(int64(len(chunkWriters)))
 			defer func() {
+				// io.WriteCloser is expected to be already Closed in JoindWriter.
+				// However, in order to avoid deadlock in the event that an error occurs during the process and Close is not performed, Close is performed by defer without fail.
 				for _, closeFunc := range chunkCloseFuncs {
 					if err := closeFunc(); err != nil {
-						d.logger.Errorf("close object writer: %v", err)
+						d.logger.Debugf("close object writer: %v", err)
 					}
 				}
 			}()
