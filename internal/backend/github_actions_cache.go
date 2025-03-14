@@ -175,7 +175,7 @@ func (c *GitHubActionsCache) doRequest(ctx context.Context, endpoint string, req
 	req.Header.Set("Content-Type", "application/json")
 
 	var res *http.Response
-	latencyGauge.Stapwatch(func() {
+	latencyGauge.Stopwatch(func() {
 		res, err = c.githubClient.Do(req)
 	}, endpoint)
 	if err != nil {
