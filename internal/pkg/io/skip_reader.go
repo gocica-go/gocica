@@ -2,16 +2,16 @@ package io
 
 import "io"
 
-// SkipCharReader は、指定された文字を読み飛ばしながら underlying io.Reader から読み込むラッパーです。
-// underlying reader から読み込んだデータから、skip で指定された文字を除外したデータのみを返します。
+// SkipCharReader is a wrapper that reads from the underlying io.Reader while skipping specified characters.
+// It returns only data that excludes the character specified by 'skip' from the data read from the underlying reader.
 type SkipCharReader struct {
 	r    io.Reader
 	skip byte
-	buf  []byte // フィルタ後のデータを保持する内部バッファ
-	err  error  // underlying reader の最終エラー（EOF も含む）
+	buf  []byte // internal buffer that holds filtered data
+	err  error  // final error from the underlying reader (including EOF)
 }
 
-// NewSkipCharReader は、与えられた io.Reader とスキップする文字から SkipCharReader を作成します。
+// NewSkipCharReader creates a new SkipCharReader from the given io.Reader and character to skip.
 func NewSkipCharReader(r io.Reader, skip byte) *SkipCharReader {
 	return &SkipCharReader{
 		r:    r,

@@ -9,7 +9,7 @@ type WriterWithSize struct {
 
 type JoinedWriter struct {
 	writers   []WriterWithSize
-	curWriter int // 現在のwriterのインデックス
+	curWriter int // current writer index
 }
 
 func NewJoinedWriter(writers ...WriterWithSize) *JoinedWriter {
@@ -34,13 +34,13 @@ func (j *JoinedWriter) Write(p []byte) (n int, err error) {
 			continue
 		}
 
-		// 書き込むサイズを決定
+		// determine the size to write
 		writeSize := int64(len(remaining))
 		if writeSize > writer.Size {
 			writeSize = writer.Size
 		}
 
-		// 実際の書き込みを実行
+		// execute the actual write
 		written, writeErr := writer.Writer.Write(remaining[:writeSize])
 		totalWritten += written
 		writer.Size -= int64(written)
