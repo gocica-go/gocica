@@ -3,17 +3,21 @@ package blob
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/DataDog/zstd"
+	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 )
 
 type Downloader struct {
+	logger     log.Logger
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
@@ -25,8 +29,9 @@ type DownloadClient interface {
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
 
-func NewDownloader(ctx context.Context, client DownloadClient) (*Downloader, error) {
+func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
 	downloader := &Downloader{
+		logger: logger,
 		client: client,
 	}
 
@@ -66,7 +71,7 @@ func (d *Downloader) GetEntries(context.Context) (metadata map[string]*v1.IndexE
 	return d.header.Entries, nil
 }
 
-func (d *Downloader) GetOutputs(context.Context) (outputs map[string]*v1.ActionsOutput, err error) {
+func (d *Downloader) GetOutputs(context.Context) (outputs []*v1.ActionsOutput, err error) {
 	return d.header.Outputs, nil
 }
 
@@ -78,49 +83,94 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 	return url, offset, size, nil
 }
 
-var ErrOutputNotFound = errors.New("output not found")
+const maxChunkSize = 4 * (1 << 20)
 
-func (d *Downloader) DownloadOutputBlock(ctx context.Context, blobID string, w io.Writer) error {
-	output, ok := d.header.Outputs[blobID]
-	if !ok {
-		return ErrOutputNotFound
-	}
+// openFileLimit is the maximum number of files that can be opened at the same time.
+// ref: https://github.com/golang/go/issues/46279
+const openFileLimit = 100000
 
-	if output.Size <= 0 {
-		return fmt.Errorf("invalid output size: %d", output.Size)
-	}
+func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
+	outputs := d.header.Outputs
+	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
+		return int(x.Offset - y.Offset)
+	})
 
-	offset := d.headerSize + output.Offset
-	switch output.Compression {
-	case v1.Compression_COMPRESSION_ZSTD:
-		pr, pw := io.Pipe()
-		defer pr.Close()
+	eg := errgroup.Group{}
 
-		eg := errgroup.Group{}
+	s := semaphore.NewWeighted(openFileLimit)
+	offset := d.headerSize
+	for i := 0; i < len(outputs); {
+		d.logger.Debugf("creating chunk: %d", i)
+		chunkOffset := offset
+		chunkSize := int64(0)
+		chunkWriters := []myio.WriterWithSize{}
+		chunkCloseFuncs := []func() error{}
+		for ; i < len(outputs) && chunkSize < maxChunkSize; i++ {
+			output := outputs[i]
+			offset += output.Size
+			chunkSize += output.Size
+
+			d.logger.Debugf("acquiring semaphore(%d): outputID=%s", i, output.Id)
+
+			err := s.Acquire(ctx, 1)
+			if err != nil {
+				return fmt.Errorf("acquire semaphore: %w", err)
+			}
+
+			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.Id)
+
+			w, err := objectWriterFunc(ctx, outputs[i].Id)
+			if err != nil {
+				return fmt.Errorf("get object writer: %w", err)
+			}
+			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
+
+			switch output.Compression {
+			case v1.Compression_COMPRESSION_ZSTD:
+				d.logger.Debugf("creating decompress writer(%d): outputID=%s", i, output.Id)
+				w = zstd.NewDecompressWriter(w)
+				chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
+			case v1.Compression_COMPRESSION_UNSPECIFIED:
+				fallthrough
+			default:
+				d.logger.Debugf("creating raw writer(%d): outputID=%s", i, output.Id)
+			}
+
+			chunkWriters = append(chunkWriters, myio.WriterWithSize{
+				Writer: w,
+				Size:   outputs[i].Size,
+			})
+		}
+
+		slices.Reverse(chunkCloseFuncs)
+		j := i
 		eg.Go(func() error {
-			defer pw.Close()
-			if err := d.client.DownloadBlock(ctx, offset, output.Size, pw); err != nil {
+			defer s.Release(int64(len(chunkWriters)))
+			defer func() {
+				for _, closeFunc := range chunkCloseFuncs {
+					if err := closeFunc(); err != nil {
+						d.logger.Errorf("close object writer: %v", err)
+					}
+				}
+			}()
+
+			jw := myio.NewJoinedWriter(chunkWriters...)
+
+			d.logger.Debugf("downloading chunk: %d/%d", j, len(outputs))
+			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
 				return fmt.Errorf("download block: %w", err)
 			}
+
+			d.logger.Debugf("downloaded chunk: %d/%d", j, len(outputs))
+
 			return nil
 		})
+	}
 
-		zr := zstd.NewReader(pr)
-		defer zr.Close()
+	d.logger.Debugf("waiting for all chunks")
 
-		if _, err := io.Copy(w, zr); err != nil {
-			return fmt.Errorf("copy decompressed data: %w", err)
-		}
-
-		if err := eg.Wait(); err != nil {
-			return err
-		}
-	case v1.Compression_COMPRESSION_UNSPECIFIED:
-		if err := d.client.DownloadBlock(ctx, offset, output.Size, w); err != nil {
-			return fmt.Errorf("download block: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported compression: %v", output.Compression)
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 
 	return nil

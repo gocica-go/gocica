@@ -5,15 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
-	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -27,7 +23,7 @@ type Disk struct {
 	rootPath string
 
 	objectMapLocker sync.RWMutex
-	objectMap       map[string]struct{}
+	objectMap       map[string]*objectLocker
 }
 
 func NewDisk(logger log.Logger, dir string) (*Disk, error) {
@@ -36,127 +32,92 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 		return nil, fmt.Errorf("create root directory: %w", err)
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read root directory: %w", err)
-	}
-
-	objectMap := make(map[string]struct{})
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if strings.HasPrefix(name, "o-") {
-			objectMap[decodeID(strings.TrimPrefix(name, "o-"))] = struct{}{}
-		}
-	}
-
 	logger.Infof("disk backend initialized.")
 
 	disk := &Disk{
 		logger:    logger,
 		rootPath:  dir,
-		objectMap: objectMap,
+		objectMap: map[string]*objectLocker{},
 	}
 
 	return disk, nil
 }
 
-func (d *Disk) MetaData(context.Context) (map[string]*v1.IndexEntry, error) {
-	buf, err := os.ReadFile(filepath.Join(d.rootPath, metadataFilePath))
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read metadata file: %w", err)
-	}
-
-	indexEntryMap := &v1.IndexEntryMap{}
-	if err := proto.Unmarshal(buf, indexEntryMap); err != nil {
-		return nil, fmt.Errorf("unmarshal metadata: %w", err)
-	}
-
-	return indexEntryMap.Entries, nil
-}
-
-func (d *Disk) WriteMetaData(_ context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	indexEntryMap := &v1.IndexEntryMap{
-		Entries: metaDataMap,
-	}
-	buf, err := proto.Marshal(indexEntryMap)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	err = os.WriteFile(filepath.Join(d.rootPath, metadataFilePath), buf, 0600)
-	if err != nil {
-		return fmt.Errorf("write metadata file: %w", err)
-	}
-
-	return nil
+type objectLocker struct {
+	l  sync.RWMutex
+	ok bool
 }
 
 func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err error) {
-	d.objectMapLocker.RLock()
-	defer d.objectMapLocker.RUnlock()
-
-	if _, ok := d.objectMap[outputID]; !ok {
+	var (
+		l  *objectLocker
+		ok bool
+	)
+	func() {
+		d.objectMapLocker.RLock()
+		defer d.objectMapLocker.RUnlock()
+		l, ok = d.objectMap[outputID]
+	}()
+	if !ok {
 		return "", nil
 	}
 
+	d.logger.Debugf("read lock waiting outputID=%s", outputID)
+	l.l.RLock()
+	defer l.l.RUnlock()
+	d.logger.Debugf("read lock acquired outputID=%s", outputID)
+	if !l.ok {
+		return "", nil
+	}
 	return d.objectFilePath(outputID), nil
 }
 
 var ErrSizeMismatch = errors.New("size mismatch")
 
-func (d *Disk) Put(_ context.Context, outputID string, size int64, body io.Reader) (string, error) {
-	defer func() {
-		_, err := io.Copy(io.Discard, body)
-		if err != nil {
-			d.logger.Warnf("discard body: %v", err)
-		}
-	}()
+func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.WriteCloser, error) {
 	outputFilePath := d.objectFilePath(outputID)
-
-	var ok bool
-	func() {
-		d.objectMapLocker.RLock()
-		defer d.objectMapLocker.RUnlock()
-		_, ok = d.objectMap[outputID]
-	}()
-	if ok {
-		return "", nil
-	}
 
 	var f *os.File
 	f, err := os.Create(outputFilePath)
 	if err != nil {
-		return "", fmt.Errorf("create output file: %w", err)
+		return "", nil, fmt.Errorf("create output file: %w", err)
 	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
-			err = errors.Join(err, fmt.Errorf("close output file: %w", closeErr))
+
+	d.logger.Debugf("output file created: path=%s", outputFilePath)
+	var l *objectLocker
+	func() {
+		d.objectMapLocker.Lock()
+		defer d.objectMapLocker.Unlock()
+		var ok bool
+		l, ok = d.objectMap[outputID]
+		if !ok {
+			l = &objectLocker{}
+			d.objectMap[outputID] = l
 		}
 	}()
-
-	if size != 0 {
-		n, err := io.Copy(f, body)
-		if err != nil {
-			return "", fmt.Errorf("write output file: %w", err)
-		}
-
-		if n != size {
-			return "", ErrSizeMismatch
-		}
+	d.logger.Debugf("write lock waiting outputID=%s", outputID)
+	l.l.Lock()
+	d.logger.Debugf("write lock acquired outputID=%s", outputID)
+	wrapped := &WriteCloserWithUnlock{
+		WriteCloser: f,
+		unlock: func() {
+			d.logger.Debugf("lock released outputID=%s", outputID)
+			l.ok = true
+			l.l.Unlock()
+		},
 	}
 
-	d.objectMapLocker.Lock()
-	defer d.objectMapLocker.Unlock()
-	d.objectMap[outputID] = struct{}{}
+	return outputFilePath, wrapped, nil
+}
 
-	return outputFilePath, nil
+type WriteCloserWithUnlock struct {
+	io.WriteCloser
+	unlock func()
+}
+
+func (w *WriteCloserWithUnlock) Close() error {
+	defer w.unlock()
+	return w.WriteCloser.Close()
 }
 
 func (d *Disk) objectFilePath(id string) string {

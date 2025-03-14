@@ -15,10 +15,11 @@ message ActionsOutput {
   int64 offset = 1;
   int64 size = 2;
   Compression compression = 3;
+  string id = 4;
 }
 
 message ActionsCache {
   map<string, IndexEntry> entries = 1;
-  map<string, ActionsOutput> outputs = 2;
+  repeated ActionsOutput outputs = 2;
   int64 output_total_size = 3;
 }

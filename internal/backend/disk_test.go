@@ -1,8 +1,8 @@
 package backend
 
 import (
-	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +17,7 @@ func TestNewDisk(t *testing.T) {
 	tests := []struct {
 		name          string
 		wantErr       bool
-		wantObjectMap map[string]struct{}
+		wantObjectMap map[string]*objectLocker
 		setup         func(t *testing.T) string
 	}{
 		{
@@ -25,36 +25,7 @@ func TestNewDisk(t *testing.T) {
 			setup: func(t *testing.T) string {
 				return t.TempDir()
 			},
-			wantObjectMap: map[string]struct{}{},
-		},
-		{
-			name: "one object in normal mode",
-			setup: func(t *testing.T) string {
-				dir := t.TempDir()
-				if _, err := os.Create(filepath.Join(dir, "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2-QO3Br5W5e3U0=")); err != nil {
-					t.Fatal(err)
-				}
-				return dir
-			},
-			wantObjectMap: map[string]struct{}{
-				"mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2/QO3Br5W5e3U0=": {},
-			},
-		},
-		{
-			name: "ignore non-object files in normal mode",
-			setup: func(t *testing.T) string {
-				dir := t.TempDir()
-				if _, err := os.Create(filepath.Join(dir, "o-mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0=")); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := os.Create(filepath.Join(dir, "r-empty-file")); err != nil {
-					t.Fatal(err)
-				}
-				return dir
-			},
-			wantObjectMap: map[string]struct{}{
-				"mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0=": {},
-			},
+			wantObjectMap: map[string]*objectLocker{},
 		},
 		{
 			name:    "error on directory creation",
@@ -166,10 +137,17 @@ func TestDisk_Get(t *testing.T) {
 			ctx := context.Background()
 
 			if tt.isExist {
-				_, err = disk.Put(ctx, outputID, int64(len(tt.setupData)), bytes.NewReader(tt.setupData))
-				if err != nil {
-					t.Fatal(err)
-				}
+				func() {
+					_, w, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer w.Close()
+
+					if _, err := w.Write(tt.setupData); err != nil {
+						t.Fatal(err)
+					}
+				}()
 			}
 
 			gotPath, err := disk.Get(ctx, outputID)
@@ -241,7 +219,19 @@ func TestDisk_Put(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			gotPath, err := disk.Put(context.Background(), outputID, int64(len(tt.data)), bytes.NewReader(tt.data))
+			var gotPath string
+			func() {
+				var w io.WriteCloser
+				gotPath, w, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer w.Close()
+
+				if _, err := w.Write(tt.data); err != nil {
+					t.Fatal(err)
+				}
+			}()
 
 			if diff := cmp.Diff(tt.want.err, err); diff != "" {
 				t.Errorf("error mismatch (-want +got):\n%s", diff)

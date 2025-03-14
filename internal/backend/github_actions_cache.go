@@ -43,6 +43,7 @@ func NewGitHubActionsCache(
 	token string,
 	strBaseURL string,
 	runnerOS, ref, sha string,
+	localBackend LocalBackend,
 ) (*GitHubActionsCache, error) {
 	baseURL, err := url.Parse(strBaseURL)
 	if err != nil {
@@ -70,6 +71,18 @@ func NewGitHubActionsCache(
 
 	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
 		return nil, fmt.Errorf("setup uploader: %w", err)
+	}
+
+	if c.downloader != nil {
+		// Download all output blocks in the background.
+		go func() {
+			if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
+				_, w, err := localBackend.Put(ctx, objectID, 0)
+				return w, err
+			}); err != nil {
+				logger.Errorf("download all output blocks: %v", err)
+			}
+		}()
 	}
 
 	logger.Infof("GitHub Actions cache backend initialized.")
@@ -100,7 +113,7 @@ func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error
 		return "", fmt.Errorf("create download client: %w", err)
 	}
 
-	c.downloader, err = blob.NewDownloader(ctx, blob.NewAzureDownloadClient(downloadClient))
+	c.downloader, err = blob.NewDownloader(ctx, c.logger, blob.NewAzureDownloadClient(downloadClient))
 	if err != nil {
 		return "", fmt.Errorf("create downloader: %w", err)
 	}
@@ -294,21 +307,6 @@ func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[
 
 	if err := c.commitCacheEntry(ctx, key, size); err != nil {
 		return fmt.Errorf("commit cache entry: %w", err)
-	}
-
-	return nil
-}
-
-func (c *GitHubActionsCache) Get(ctx context.Context, objectID string, _ int64, w io.Writer) error {
-	if c.downloader == nil {
-		return nil
-	}
-
-	if err := c.downloader.DownloadOutputBlock(ctx, objectID, w); err != nil {
-		if errors.Is(err, blob.ErrOutputNotFound) {
-			return nil
-		}
-		return fmt.Errorf("download output block: %w", err)
 	}
 
 	return nil
