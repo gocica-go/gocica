@@ -86,7 +86,7 @@ func (g *Gauge) getRecords() []record {
 	return g.records
 }
 
-func (g *Gauge) Stapwatch(f func(), label string) {
+func (g *Gauge) Stopwatch(f func(), label string) {
 	start := time.Now()
 	start = start.Round(0) // delete monotonic clock value
 	f()

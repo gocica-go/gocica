@@ -31,7 +31,7 @@ func (a *AzureUploadClient) UploadBlock(ctx context.Context, blockID string, r i
 		return 0, fmt.Errorf("seek start: %w", err)
 	}
 
-	latencyGauge.Stapwatch(func() {
+	latencyGauge.Stopwatch(func() {
 		_, err = a.client.StageBlock(ctx, blockID, r, nil)
 	}, "stage_block")
 	if err != nil {
@@ -43,7 +43,7 @@ func (a *AzureUploadClient) UploadBlock(ctx context.Context, blockID string, r i
 
 func (a *AzureUploadClient) UploadBlockFromURL(ctx context.Context, blockID string, url string, offset, size int64) error {
 	var err error
-	latencyGauge.Stapwatch(func() {
+	latencyGauge.Stopwatch(func() {
 		_, err = a.client.StageBlockFromURL(ctx, blockID, url, &blockblob.StageBlockFromURLOptions{
 			Range: blob.HTTPRange{Offset: offset, Count: size},
 		})
@@ -57,7 +57,7 @@ func (a *AzureUploadClient) UploadBlockFromURL(ctx context.Context, blockID stri
 
 func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string) error {
 	var err error
-	latencyGauge.Stapwatch(func() {
+	latencyGauge.Stopwatch(func() {
 		_, err = a.client.CommitBlockList(ctx, blockIDs, nil)
 	}, "commit_block_list")
 	if err != nil {
@@ -86,7 +86,7 @@ func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, s
 		res blob.DownloadStreamResponse
 		err error
 	)
-	latencyGauge.Stapwatch(func() {
+	latencyGauge.Stopwatch(func() {
 		res, err = a.client.DownloadStream(ctx, &blob.DownloadStreamOptions{
 			Range: blob.HTTPRange{Offset: offset, Count: size},
 		})
@@ -105,7 +105,7 @@ func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, s
 
 func (a *AzureDownloadClient) DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error {
 	var err error
-	latencyGauge.Stapwatch(func() {
+	latencyGauge.Stopwatch(func() {
 		_, err = a.client.DownloadBuffer(ctx, buf, &blob.DownloadBufferOptions{
 			Range: blob.HTTPRange{Offset: offset, Count: size},
 		})
