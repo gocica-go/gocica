@@ -71,6 +71,7 @@ jobs:
     env:
       GOMODCACHE: /tmp/gocache/mod
     steps:
+      - run: cat /proc/cpuinfo
       - uses: actions/checkout@v4
         with:
           repository: traPtitech/traQ
