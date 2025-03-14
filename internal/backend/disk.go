@@ -100,11 +100,11 @@ func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.Writ
 	d.logger.Debugf("write lock acquired outputID=%s", outputID)
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
-		unlock: sync.OnceFunc(func() {
+		unlock: func() {
 			d.logger.Debugf("lock released outputID=%s", outputID)
 			l.ok = true
 			l.l.Unlock()
-		}),
+		},
 	}
 
 	return outputFilePath, wrapped, nil
