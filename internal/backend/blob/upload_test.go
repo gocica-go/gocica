@@ -611,3 +611,238 @@ func TestUploader_createHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestUploader_constructOutputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		baseOutputSize int64
+		baseOutputs    []*v1.ActionsOutput
+		outputs        []*v1.ActionsOutput
+		wantOutputIDs  []string
+		wantOutputs    []*v1.ActionsOutput
+		wantOffset     int64
+	}{
+		{
+			name:           "empty base outputs",
+			baseOutputSize: 0,
+			baseOutputs:    []*v1.ActionsOutput{},
+			outputs: []*v1.ActionsOutput{
+				{
+					Id:   "output1",
+					Size: 100,
+				},
+				{
+					Id:   "output2",
+					Size: 200,
+				},
+			},
+			wantOutputIDs: []string{"output1", "output2"},
+			wantOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "output1",
+					Offset: 0,
+					Size:   100,
+				},
+				{
+					Id:     "output2",
+					Offset: 100,
+					Size:   200,
+				},
+			},
+			wantOffset: 300,
+		},
+		{
+			name:           "empty new outputs",
+			baseOutputSize: 100,
+			baseOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   50,
+				},
+				{
+					Id:     "base2",
+					Offset: 50,
+					Size:   50,
+				},
+			},
+			outputs:       []*v1.ActionsOutput{},
+			wantOutputIDs: []string{},
+			wantOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   50,
+				},
+				{
+					Id:     "base2",
+					Offset: 50,
+					Size:   50,
+				},
+			},
+			wantOffset: 100,
+		},
+		{
+			name:           "no duplicates",
+			baseOutputSize: 150,
+			baseOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   50,
+				},
+				{
+					Id:     "base2",
+					Offset: 50,
+					Size:   100,
+				},
+			},
+			outputs: []*v1.ActionsOutput{
+				{
+					Id:   "output1",
+					Size: 200,
+				},
+				{
+					Id:   "output2",
+					Size: 300,
+				},
+			},
+			wantOutputIDs: []string{"output1", "output2"},
+			wantOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   50,
+				},
+				{
+					Id:     "base2",
+					Offset: 50,
+					Size:   100,
+				},
+				{
+					Id:     "output1",
+					Offset: 150,
+					Size:   200,
+				},
+				{
+					Id:     "output2",
+					Offset: 350,
+					Size:   300,
+				},
+			},
+			wantOffset: 650,
+		},
+		{
+			name:           "with duplicates",
+			baseOutputSize: 200,
+			baseOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   50,
+				},
+				{
+					Id:     "duplicate",
+					Offset: 50,
+					Size:   150,
+				},
+			},
+			outputs: []*v1.ActionsOutput{
+				{
+					Id:   "duplicate", // この出力はベース出力と重複するため結合結果に追加されない
+					Size: 100,
+				},
+				{
+					Id:   "output1",
+					Size: 250,
+				},
+			},
+			wantOutputIDs: []string{"output1"},
+			wantOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   50,
+				},
+				{
+					Id:     "duplicate",
+					Offset: 50,
+					Size:   150,
+				},
+				{
+					Id:     "output1",
+					Offset: 200,
+					Size:   250,
+				},
+			},
+			wantOffset: 450,
+		},
+		{
+			name:           "with zero size outputs",
+			baseOutputSize: 100,
+			baseOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   100,
+				},
+			},
+			outputs: []*v1.ActionsOutput{
+				{
+					Id:   "zero",
+					Size: 0,
+				},
+				{
+					Id:   "output1",
+					Size: 150,
+				},
+			},
+			wantOutputIDs: []string{"output1"}, // サイズが0の出力はwantOutputIDsに含まれない
+			wantOutputs: []*v1.ActionsOutput{
+				{
+					Id:     "base1",
+					Offset: 0,
+					Size:   100,
+				},
+				{
+					Id:     "zero",
+					Offset: 100,
+					Size:   0,
+				},
+				{
+					Id:     "output1",
+					Offset: 100,
+					Size:   150,
+				},
+			},
+			wantOffset: 250,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			uploader := &Uploader{
+				outputs: tt.outputs,
+			}
+
+			gotOutputIDs, gotOutputs, gotOffset := uploader.constructOutputs(tt.baseOutputSize, tt.baseOutputs)
+
+			if diff := cmp.Diff(tt.wantOutputIDs, gotOutputIDs); diff != "" {
+				t.Errorf("output IDs mismatch (-want +got):\n%s", diff)
+			}
+
+			if diff := cmp.Diff(tt.wantOutputs, gotOutputs, cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
+				t.Errorf("outputs mismatch (-want +got):\n%s", diff)
+			}
+
+			if diff := cmp.Diff(tt.wantOffset, gotOffset); diff != "" {
+				t.Errorf("offset mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

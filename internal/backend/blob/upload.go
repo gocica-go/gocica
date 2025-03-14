@@ -189,6 +189,7 @@ func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs []*v1.Acti
 		outputMap[output.Id] = struct{}{}
 		output.Offset = offset
 		offset += output.Size
+		outputs = append(outputs, output)
 		if output.Size != 0 {
 			newOutputIDs = append(newOutputIDs, output.Id)
 		}
