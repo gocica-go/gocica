@@ -16,6 +16,6 @@ type Gauge struct{}
 
 func (g *Gauge) Set(float64, string) {}
 
-func (g *Gauge) Stapwatch(f func(), lebel string) {
+func (g *Gauge) Stapwatch(f func(), _ string) {
 	f()
 }
