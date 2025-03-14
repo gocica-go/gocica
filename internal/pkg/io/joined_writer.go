@@ -3,7 +3,7 @@ package io
 import "io"
 
 type WriterWithSize struct {
-	Writer io.Writer
+	Writer io.WriteCloser // Changed from io.Writer to io.WriteCloser
 	Size   int64
 }
 
@@ -30,6 +30,10 @@ func (j *JoinedWriter) Write(p []byte) (n int, err error) {
 	for j.curWriter < len(j.writers) {
 		writer := &j.writers[j.curWriter]
 		if writer.Size <= 0 {
+			// Close writers with size <= 0 and move to the next writer
+			if closeErr := writer.Writer.Close(); closeErr != nil {
+				return totalWritten, closeErr
+			}
 			j.curWriter++
 			continue
 		}
