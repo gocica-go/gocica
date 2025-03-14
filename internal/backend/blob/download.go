@@ -83,7 +83,7 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 	return url, offset, size, nil
 }
 
-const maxChunkSize = 8 * (1 << 20)
+const maxChunkSize = 10 * (1 << 20)
 
 // openFileLimit is the maximum number of files that can be opened at the same time.
 // ref: https://github.com/golang/go/issues/46279
