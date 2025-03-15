@@ -72,6 +72,7 @@ jobs:
       GOMODCACHE: /tmp/gocache/mod
     steps:
       - run: cat /proc/cpuinfo
+      - run: getconf CLK_TCK
       - uses: actions/checkout@v4
         with:
           repository: traPtitech/traQ
