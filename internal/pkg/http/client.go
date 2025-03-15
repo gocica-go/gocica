@@ -27,8 +27,6 @@ func NewClient() *http.Client {
 		KeepAlive: keepAliveTime,
 	}).DialContext
 
-	http.DefaultTransport = newTransport
-
 	return &http.Client{
 		Transport: newTransport,
 	}
