@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/mazrean/gocica/internal/backend/blob"
 	"github.com/mazrean/gocica/internal/metrics"
+	myhttp "github.com/mazrean/gocica/internal/pkg/http"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -96,6 +97,14 @@ const (
 	actionsCacheSeparator = "-"
 )
 
+var (
+	azureConfig = &blockblob.ClientOptions{
+		ClientOptions: azcore.ClientOptions{
+			Transport: myhttp.NewClient(),
+		},
+	}
+)
+
 func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error) {
 	blobKey, restoreKeys := c.blobKey()
 
@@ -106,9 +115,7 @@ func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error
 		return "", nil
 	}
 
-	downloadClient, err := blockblob.NewClientWithNoCredential(downloadURL, &blockblob.ClientOptions{
-		ClientOptions: azcore.ClientOptions{},
-	})
+	downloadClient, err := blockblob.NewClientWithNoCredential(downloadURL, azureConfig)
 	if err != nil {
 		return "", fmt.Errorf("create download client: %w", err)
 	}
@@ -133,9 +140,7 @@ func (c *GitHubActionsCache) setupUploader(ctx context.Context, downloadURL stri
 		return fmt.Errorf("create cache entry: %w", err)
 	}
 
-	uploadClient, err := blockblob.NewClientWithNoCredential(uploadURL, &blockblob.ClientOptions{
-		ClientOptions: azcore.ClientOptions{},
-	})
+	uploadClient, err := blockblob.NewClientWithNoCredential(uploadURL, azureConfig)
 	if err != nil {
 		return fmt.Errorf("create upload client: %w", err)
 	}
