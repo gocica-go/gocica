@@ -40,7 +40,7 @@ type BaseBlobProvider interface {
 	GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error)
 }
 
-type waitBaseFunc func() (baseBlockID string, baseOutputSize int64, baseOutputs []*v1.ActionsOutput, err error)
+type waitBaseFunc func() (baseBlockIDs []string, baseOutputSize int64, baseOutputs []*v1.ActionsOutput, err error)
 
 func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
 	uploader := &Uploader{
@@ -61,35 +61,46 @@ func (u *Uploader) generateBlockID() (string, error) {
 	return base64.StdEncoding.EncodeToString(buf[:]), nil
 }
 
+const maxUploadChunkSize = 4 * (1 << 20)
+
 func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	if baseBlobProvider == nil {
-		return func() (string, int64, []*v1.ActionsOutput, error) {
-			return "", 0, nil, nil
+		return func() ([]string, int64, []*v1.ActionsOutput, error) {
+			return nil, 0, nil, nil
 		}
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var (
-		baseBlockID    string
+		baseBlockIDs   []string
 		baseOutputSize int64
 	)
 	eg.Go(func() error {
-		var err error
-		baseBlockID, err = u.generateBlockID()
-		if err != nil {
-			return fmt.Errorf("generate block ID: %w", err)
-		}
-
 		url, offset, size, err := baseBlobProvider.GetOutputBlockURL(ctx)
 		if err != nil {
 			return fmt.Errorf("get output block URL: %w", err)
 		}
 		baseOutputSize = size
 
-		err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset, size)
-		if err != nil {
-			return fmt.Errorf("upload block from URL: %w", err)
+		var uploadSize int64
+		for i := int64(0); i < size; i += uploadSize {
+			baseBlockID, err := u.generateBlockID()
+			if err != nil {
+				return fmt.Errorf("generate block ID: %w", err)
+			}
+			baseBlockIDs = append(baseBlockIDs, baseBlockID)
+
+			chunkUploadSize := min(maxUploadChunkSize, size-i)
+			uploadSize = chunkUploadSize
+			eg.Go(func() error {
+				err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset+i, chunkUploadSize)
+				if err != nil {
+					return fmt.Errorf("upload block from URL: %w", err)
+				}
+
+				return nil
+			})
 		}
 
 		return nil
@@ -106,13 +117,13 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 		return nil
 	})
 
-	return func() (string, int64, []*v1.ActionsOutput, error) {
+	return func() ([]string, int64, []*v1.ActionsOutput, error) {
 		if err := eg.Wait(); err != nil {
-			return "", 0, nil, err
+			return nil, 0, nil, err
 		}
 		u.logger.Debugf("base output size=%d", baseOutputSize)
 
-		return baseBlockID, baseOutputSize, baseOutputs, nil
+		return baseBlockIDs, baseOutputSize, baseOutputs, nil
 	}
 }
 
@@ -218,9 +229,12 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1
 }
 
 func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) (int64, error) {
-	baseBlockID, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
+	baseBlockIDs, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
 	if err != nil {
-		return 0, fmt.Errorf("wait base: %w", err)
+		u.logger.Warnf("failed to upload base: %v", err)
+		baseBlockIDs = nil
+		baseOutputSize = 0
+		baseOutputs = []*v1.ActionsOutput{}
 	}
 
 	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
@@ -242,9 +256,7 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 
 	blockIDs := make([]string, 0, len(newOutputIDs)+2)
 	blockIDs = append(blockIDs, headerBlockID)
-	if baseBlockID != "" {
-		blockIDs = append(blockIDs, baseBlockID)
-	}
+	blockIDs = append(blockIDs, baseBlockIDs...)
 	blockIDs = append(blockIDs, newOutputIDs...)
 	err = u.client.Commit(ctx, blockIDs)
 	if err != nil {

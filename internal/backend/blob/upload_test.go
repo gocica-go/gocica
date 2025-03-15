@@ -280,7 +280,7 @@ func TestNewUploader(t *testing.T) {
 				t.Fatal("uploader is nil")
 			}
 
-			blockID, size, outputs, err := uploader.waitBaseFunc()
+			baseBlockIDs, size, outputs, err := uploader.waitBaseFunc()
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -293,8 +293,11 @@ func TestNewUploader(t *testing.T) {
 				return
 			}
 
-			if tt.wantBlockIDEmpty && blockID != "" {
-				t.Errorf("blockID should be empty, got %s", blockID)
+			if tt.wantBlockIDEmpty && len(baseBlockIDs) > 0 {
+				t.Errorf("baseBlockIDs should be empty, got %v", baseBlockIDs)
+			}
+			if !tt.wantBlockIDEmpty && len(baseBlockIDs) == 0 {
+				t.Error("baseBlockIDs should not be empty")
 			}
 			if diff := cmp.Diff(tt.wantSize, size); diff != "" {
 				t.Errorf("size mismatch (-want +got):\n%s", diff)
