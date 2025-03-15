@@ -2,6 +2,13 @@ name: Benchmark
 
 on:
   workflow_dispatch:
+    inputs:
+      gocica-action-version:
+        description: gocica-go/action's version
+        required: true
+      gocica-version:
+        description: gocica-go/gocica's version
+        required: true
 
 permissions:
   actions: write
@@ -78,7 +85,9 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-${{ github.ref }}-
             go-mod-${{ runner.os }}-
-      - uses: gocica-go/gocica-action@v0.1.0-alpha2
+      - uses: gocica-go/gocica-action@${{ github.event.inputs.gocica-action-version }}
+        with:
+          version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
@@ -111,7 +120,9 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-${{ github.ref }}-
             go-mod-${{ runner.os }}-
-      - uses: gocica-go/gocica-action@v0.1.0-alpha2
+      - uses: gocica-go/gocica-action@${{ github.event.inputs.gocica-action-version }}
+        with:
+          version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
