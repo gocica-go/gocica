@@ -43,12 +43,17 @@ df_pivot = df_cpu_all.pivot_table(
     index=df_cpu_all.index, columns="label", values="value", aggfunc="mean"
 ).ffill()
 
-# Fill remaining NaN values with 0 (if any NaN exists at the start of data)
-df_pivot = df_pivot.fillna(0)
+# Calculate difference from previous values to get CPU usage per interval
+df_pivot_diff = df_pivot.diff(periods=10)
+time_diff = df_pivot.index.to_series().diff(periods=10).dt.total_seconds()
+
+
+rate = df_pivot_diff.div(time_diff, axis=0) * 100
+rate.dropna(inplace=True)
 
 # Create a stacked area graph
 # Sort the data by valid_labels for better visualization
-df_pivot = df_pivot[valid_labels]  # Sort by specified label order
+df_pivot = rate[valid_labels]  # Sort by specified label order
 ax = df_pivot.plot(kind="area", stacked=True, figsize=(10, 6))
 
 # Set axis labels and title
