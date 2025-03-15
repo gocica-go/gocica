@@ -86,14 +86,15 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 
 		var uploadSize int64
 		for i := int64(0); i < size; i += uploadSize {
-			eg.Go(func() error {
-				baseBlockID, err := u.generateBlockID()
-				if err != nil {
-					return fmt.Errorf("generate block ID: %w", err)
-				}
+			baseBlockID, err := u.generateBlockID()
+			if err != nil {
+				return fmt.Errorf("generate block ID: %w", err)
+			}
 
-				uploadSize = min(maxUploadChunkSize, size-i)
-				err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset+i, uploadSize)
+			chunkUploadSize := min(maxUploadChunkSize, size-i)
+			uploadSize = chunkUploadSize
+			eg.Go(func() error {
+				err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset+i, chunkUploadSize)
 				if err != nil {
 					return fmt.Errorf("upload block from URL: %w", err)
 				}
