@@ -73,8 +73,9 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var (
-		baseBlockIDs   []string
-		baseOutputSize int64
+		baseBlockIDsLock sync.Mutex
+		baseBlockIDs     []string
+		baseOutputSize   int64
 	)
 	eg.Go(func() error {
 		url, offset, size, err := baseBlobProvider.GetOutputBlockURL(ctx)
@@ -97,6 +98,8 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 					return fmt.Errorf("upload block from URL: %w", err)
 				}
 
+				baseBlockIDsLock.Lock()
+				defer baseBlockIDsLock.Unlock()
 				baseBlockIDs = append(baseBlockIDs, baseBlockID)
 
 				return nil
