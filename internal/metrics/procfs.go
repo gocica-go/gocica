@@ -60,6 +60,24 @@ func getCPUAllStat(fs procfs.FS) error {
 	cpuAllGauge.Set(float64(stat.CPUTotal.IRQ), "irq")
 	cpuAllGauge.Set(float64(stat.CPUTotal.SoftIRQ), "softirq")
 	cpuAllGauge.Set(float64(stat.CPUTotal.Steal), "steal")
+	cpuAllGauge.Set(float64(stat.CPUTotal.Guest), "guest")
+	cpuAllGauge.Set(float64(stat.CPUTotal.GuestNice), "guest_nice")
+
+	procs, err := fs.AllProcs()
+	if err != nil {
+		return fmt.Errorf("get stat: %w", err)
+	}
+
+	for _, proc := range procs {
+		stat, err := proc.Stat()
+		if err != nil {
+			return fmt.Errorf("get stat: %w", err)
+		}
+
+		cpuAllGauge.Set(float64(stat.CPUTime()), fmt.Sprintf("%v_total", stat.Processor))
+		cpuAllGauge.Set(float64(stat.CUTime), fmt.Sprintf("%v_user", stat.Processor))
+		cpuAllGauge.Set(float64(stat.CSTime), fmt.Sprintf("%v_system", stat.Processor))
+	}
 
 	return nil
 }
