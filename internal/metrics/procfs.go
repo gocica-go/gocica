@@ -63,20 +63,17 @@ func getCPUAllStat(fs procfs.FS) error {
 	cpuAllGauge.Set(float64(stat.CPUTotal.Guest), "guest")
 	cpuAllGauge.Set(float64(stat.CPUTotal.GuestNice), "guest_nice")
 
-	procs, err := fs.AllProcs()
-	if err != nil {
-		return fmt.Errorf("get stat: %w", err)
-	}
-
-	for _, proc := range procs {
-		stat, err := proc.Stat()
-		if err != nil {
-			return fmt.Errorf("get stat: %w", err)
-		}
-
-		cpuAllGauge.Set(float64(stat.CPUTime()), fmt.Sprintf("%v_total", stat.Processor))
-		cpuAllGauge.Set(float64(stat.CUTime), fmt.Sprintf("%v_user", stat.Processor))
-		cpuAllGauge.Set(float64(stat.CSTime), fmt.Sprintf("%v_system", stat.Processor))
+	for id, cpu := range stat.CPU {
+		cpuAllGauge.Set(float64(cpu.User), fmt.Sprintf("user%d", id))
+		cpuAllGauge.Set(float64(cpu.System), fmt.Sprintf("system%d", id))
+		cpuAllGauge.Set(float64(cpu.Idle), fmt.Sprintf("idle%d", id))
+		cpuAllGauge.Set(float64(cpu.Iowait), fmt.Sprintf("iowait%d", id))
+		cpuAllGauge.Set(float64(cpu.Nice), fmt.Sprintf("nice%d", id))
+		cpuAllGauge.Set(float64(cpu.IRQ), fmt.Sprintf("irq%d", id))
+		cpuAllGauge.Set(float64(cpu.SoftIRQ), fmt.Sprintf("softirq%d", id))
+		cpuAllGauge.Set(float64(cpu.Steal), fmt.Sprintf("steal%d", id))
+		cpuAllGauge.Set(float64(cpu.Guest), fmt.Sprintf("guest%d", id))
+		cpuAllGauge.Set(float64(cpu.GuestNice), fmt.Sprintf("guest_nice%d", id))
 	}
 
 	return nil
