@@ -73,9 +73,8 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var (
-		baseBlockIDsLock sync.Mutex
-		baseBlockIDs     []string
-		baseOutputSize   int64
+		baseBlockIDs   []string
+		baseOutputSize int64
 	)
 	eg.Go(func() error {
 		url, offset, size, err := baseBlobProvider.GetOutputBlockURL(ctx)
@@ -90,6 +89,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 			if err != nil {
 				return fmt.Errorf("generate block ID: %w", err)
 			}
+			baseBlockIDs = append(baseBlockIDs, baseBlockID)
 
 			chunkUploadSize := min(maxUploadChunkSize, size-i)
 			uploadSize = chunkUploadSize
@@ -98,10 +98,6 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 				if err != nil {
 					return fmt.Errorf("upload block from URL: %w", err)
 				}
-
-				baseBlockIDsLock.Lock()
-				defer baseBlockIDsLock.Unlock()
-				baseBlockIDs = append(baseBlockIDs, baseBlockID)
 
 				return nil
 			})
