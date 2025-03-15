@@ -3,9 +3,6 @@ name: Benchmark
 on:
   workflow_dispatch:
     inputs:
-      gocica-action-version:
-        description: gocica-go/action's version
-        required: true
       gocica-version:
         description: gocica-go/gocica's version
         required: true
@@ -85,7 +82,7 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-${{ github.ref }}-
             go-mod-${{ runner.os }}-
-      - uses: gocica-go/gocica-action@${{ github.event.inputs.gocica-action-version }}
+      - uses: gocica-go/gocica-action@v0.1.0-alpha7
         with:
           version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
@@ -120,7 +117,7 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-${{ github.ref }}-
             go-mod-${{ runner.os }}-
-      - uses: gocica-go/gocica-action@${{ github.event.inputs.gocica-action-version }}
+      - uses: gocica-go/gocica-action@v0.1.0-alpha7
         with:
           version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
