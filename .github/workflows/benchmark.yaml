@@ -86,7 +86,7 @@ jobs:
         with:
           version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
-      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+      - run: time go build ./cmd/tsgo
         env:
           CGO_ENABLED: 0
   cache_gocica_github:
@@ -121,7 +121,7 @@ jobs:
         with:
           version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
-      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+      - run: time go build ./cmd/tsgo
         env:
           CGO_ENABLED: 0
   no_cache_default:
@@ -179,7 +179,7 @@ jobs:
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
       - run: go mod download
-      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+      - run: time go build ./cmd/tsgo
         env:
           CGO_ENABLED: 0
   cache_default:
@@ -218,6 +218,6 @@ jobs:
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
       - run: go mod download
-      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+      - run: time go build ./cmd/tsgo
         env:
           CGO_ENABLED: 0
