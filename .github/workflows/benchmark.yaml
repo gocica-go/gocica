@@ -20,8 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: traPtitech/traQ
-          ref: v3.22.0
+          repository: microsoft/typescript-go
+          ref: main
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -68,8 +68,8 @@ jobs:
             console.log("Clear completed")
       - uses: actions/checkout@v4
         with:
-          repository: traPtitech/traQ
-          ref: v3.22.0
+          repository: microsoft/typescript-go
+          ref: main
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -103,8 +103,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: traPtitech/traQ
-          ref: v3.22.0
+          repository: microsoft/typescript-go
+          ref: main
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -138,8 +138,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: traPtitech/traQ
-          ref: v3.22.0
+          repository: microsoft/typescript-go
+          ref: main
           fetch-depth: 0
       - name: Clear cache
         uses: actions/github-script@v7
@@ -196,8 +196,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: traPtitech/traQ
-          ref: v3.22.0
+          repository: microsoft/typescript-go
+          ref: main
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
