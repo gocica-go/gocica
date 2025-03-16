@@ -96,7 +96,7 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
       - run: go mod download
       - run: mkdir ./tmp
-      - run: time go build -trimpath -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local -linkmode=internal"
+      - run: time go build -trimpath -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local -linkmode=internal all=-buildid="
         env:
           CGO_ENABLED: 0
           GOCACHEPROG: "./${{ env.APP_NAME }} --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv"
