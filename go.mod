@@ -16,7 +16,7 @@ require (
 require (
 	github.com/DataDog/zstd v1.5.6
 	github.com/felixge/fgprof v0.9.5
-	github.com/prometheus/procfs v0.15.1
+	github.com/prometheus/procfs v0.16.0
 )
 
 require (
