@@ -8,7 +8,7 @@ require (
 	github.com/alecthomas/kong v1.9.0
 	github.com/bytedance/sonic v1.13.1
 	github.com/google/go-cmp v0.7.0
-	golang.org/x/oauth2 v0.28.0
+	golang.org/x/oauth2 v0.29.0
 	golang.org/x/sync v0.12.0
 	google.golang.org/protobuf v1.36.5
 )
