@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/alecthomas/kong"
 	"github.com/mazrean/gocica/internal"
@@ -33,8 +32,7 @@ var CLI struct {
 		Ref      string `kong:"help='GitHub base ref of the workflow or the target branch of the pull request',env='GOCICA_GITHUB_REF,GITHUB_REF'"`
 		Sha      string `kong:"help='GitHub SHA of the commit',env='GOCICA_GITHUB_SHA,GITHUB_SHA'"`
 	} `kong:"optional,group='github',embed,prefix='github.'"`
-	Dev      DevFlag `kong:"group='dev',embed,prefix='dev.'"`
-	MaxProcs int     `kong:"help='Maximum number of CPUs to use',env='GOCICA_GOMAXPROCS',default='1'"`
+	Dev DevFlag `kong:"group='dev',embed,prefix='dev.'"`
 }
 
 // loadConfig loads and parses configuration from command line arguments
@@ -110,9 +108,6 @@ func main() {
 
 	// Initialize default logger with info level
 	logger := log.DefaultLogger
-
-	// Set GOMAXPROCS
-	runtime.GOMAXPROCS(CLI.MaxProcs)
 
 	// Start profiling. Enable profiling only in development mode.
 	if err := CLI.Dev.StartProfiling(); err != nil {
