@@ -36,7 +36,7 @@ var CLI struct {
 }
 
 // loadConfig loads and parses configuration from command line arguments
-func loadConfig(logger log.Logger) (*kong.Context, error) {
+func loadConfig() (*kong.Context, error) {
 	// Parse command line arguments
 	parser := kong.Must(&CLI,
 		kong.Name("gocica"),
@@ -100,14 +100,14 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 }
 
 func main() {
-	// Initialize default logger with info level
-	logger := log.DefaultLogger
-
 	// Load configuration
-	_, err := loadConfig(logger)
+	_, err := loadConfig()
 	if err != nil {
 		panic(fmt.Errorf("invalid configuration: %w", err))
 	}
+
+	// Initialize default logger with info level
+	logger := log.DefaultLogger
 
 	// Start profiling. Enable profiling only in development mode.
 	if err := CLI.Dev.StartProfiling(); err != nil {
