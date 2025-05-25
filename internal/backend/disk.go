@@ -12,10 +12,6 @@ import (
 	"github.com/mazrean/gocica/log"
 )
 
-const (
-	metadataFilePath = "r-metadata"
-)
-
 var _ LocalBackend = &Disk{}
 
 type Disk struct {
