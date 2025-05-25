@@ -162,14 +162,24 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	var (
 		remoteReader io.ReadSeeker
 		localReader  io.Reader
+		printReader  io.Reader
 	)
 	if size == 0 {
 		remoteReader = myio.EmptyReader
 		localReader = myio.EmptyReader
+		printReader = myio.EmptyReader
 	} else {
 		remoteReader = body
 		localReader = body.Clone()
+		printReader = body.Clone()
 	}
+
+	sb := strings.Builder{}
+	_, err = io.Copy(&sb, printReader)
+	if err != nil {
+		return "", fmt.Errorf("copy: %w", err)
+	}
+	b.logger.Debugf("printReader: %s %s", outputID, sb.String())
 
 	b.eg.Go(func() error {
 		if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
