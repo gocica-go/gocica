@@ -10,6 +10,11 @@ on:
 permissions:
   actions: write
 
+env:
+  TARGET_REPO: fujiwara/awslim
+  TARGET_REF: v0.4.0
+  BUILD_CMD: go build ./cmd/awslim/
+
 jobs:
   setup_modcache:
     name: Setup modcache
@@ -20,8 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: tailscale/tailscale
-          ref: v1.80.3
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -68,8 +73,8 @@ jobs:
             console.log("Clear completed")
       - uses: actions/checkout@v4
         with:
-          repository: tailscale/tailscale
-          ref: v1.80.3
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -86,7 +91,7 @@ jobs:
         with:
           version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
-      - run: time go build ./cmd/...
+      - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
   cache_gocica_github:
@@ -103,8 +108,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: tailscale/tailscale
-          ref: v1.80.3
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -121,7 +126,7 @@ jobs:
         with:
           version: ${{ github.event.inputs.gocica-version }}
       - run: go mod download
-      - run: time go build ./cmd/...
+      - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
   no_cache_default:
@@ -138,8 +143,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: tailscale/tailscale
-          ref: v1.80.3
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
       - name: Clear cache
         uses: actions/github-script@v7
@@ -179,7 +184,7 @@ jobs:
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
       - run: go mod download
-      - run: time go build ./cmd/...
+      - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
   cache_default:
@@ -196,8 +201,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: tailscale/tailscale
-          ref: v1.80.3
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
@@ -218,6 +223,6 @@ jobs:
             go-build-${{ runner.os }}-${{ github.ref }}-
             go-build-${{ runner.os }}-
       - run: go mod download
-      - run: time go build ./cmd/...
+      - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
