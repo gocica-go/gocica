@@ -61,7 +61,7 @@ jobs:
       - name: Expose GitHub Actions runtime environment variables
         uses: crazy-max/ghaction-github-runtime@v3
       - name: Build standard library
-        run: time go install std
+        run: time go install -buildvcs=false std
         env:
           GOCACHEPROG: "./${{ env.APP_NAME }}"
   traq_build:
@@ -96,7 +96,7 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v3
       - run: go mod download
       - run: mkdir ./tmp
-      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+      - run: time go build -o traQ -buildvcs=false -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
           CGO_ENABLED: 0
           GOCACHEPROG: "./${{ env.APP_NAME }} --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv"

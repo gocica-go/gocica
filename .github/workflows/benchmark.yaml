@@ -14,7 +14,7 @@ env:
   TARGET_REPO: fujiwara/awslim
   TARGET_REF: v0.4.0
   PRE_BUILD_CMD: cp all-services.yaml gen.yaml && go generate ./cmd/awslim-gen
-  BUILD_CMD: go build ./cmd/awslim/
+  BUILD_CMD: go build -buildvcs=false ./cmd/awslim/
 
 jobs:
   setup_modcache:
