@@ -13,6 +13,7 @@ permissions:
 env:
   TARGET_REPO: fujiwara/awslim
   TARGET_REF: v0.4.0
+  PRE_BUILD_CMD: cp all-services.yaml gen.yaml && go generate ./cmd/awslim-gen
   BUILD_CMD: go build ./cmd/awslim/
 
 jobs:
@@ -76,6 +77,8 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
+      - name: Pre build
+        run: ${{ env.PRE_BUILD_CMD }}
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
@@ -111,6 +114,8 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
+      - name: Pre build
+        run: ${{ env.PRE_BUILD_CMD }}
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
@@ -165,6 +170,8 @@ jobs:
               })
             }
             console.log("Clear completed")
+      - name: Pre build
+        run: ${{ env.PRE_BUILD_CMD }}
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
@@ -204,6 +211,8 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           fetch-depth: 0
+      - name: Pre build
+        run: ${{ env.PRE_BUILD_CMD }}
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
