@@ -9,14 +9,14 @@ require (
 	github.com/bytedance/sonic v1.13.2
 	github.com/google/go-cmp v0.7.0
 	golang.org/x/oauth2 v0.28.0
-	golang.org/x/sync v0.12.0
+	golang.org/x/sync v0.13.0
 	google.golang.org/protobuf v1.36.6
 )
 
 require (
 	github.com/DataDog/zstd v1.5.6
 	github.com/felixge/fgprof v0.9.5
-	github.com/prometheus/procfs v0.15.1
+	github.com/prometheus/procfs v0.16.1
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	golang.org/x/arch v0.14.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
 
