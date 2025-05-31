@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
@@ -44,6 +45,12 @@ type MetaData struct {
 }
 
 var _ Backend = &ConbinedBackend{}
+
+var (
+	requestGauge  = metrics.NewGauge("backend_request")
+	durationGauge = metrics.NewGauge("backend_duration")
+	cacheHitGauge = metrics.NewGauge("backend_cache_hit")
+)
 
 type ConbinedBackend struct {
 	logger log.Logger
@@ -96,33 +103,48 @@ func (b *ConbinedBackend) start() {
 }
 
 func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
-	indexEntry, ok := b.metaDataMap[actionID]
-	if !ok {
-		return "", nil, nil
-	}
+	requestGauge.Set(1, "get")
 
-	diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
-	if err != nil {
-		return "", nil, fmt.Errorf("get local cache: %w", err)
-	}
+	durationGauge.Stopwatch(func() {
+		indexEntry, ok := b.metaDataMap[actionID]
+		if !ok {
+			cacheHitGauge.Set(0, "miss")
+			return
+		}
 
-	if diskPath == "" {
-		return "", nil, nil
-	}
+		diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
+		if err != nil {
+			err = fmt.Errorf("get local cache: %w", err)
+			return
+		}
 
-	b.newMetaDataMapLocker.Lock()
-	defer b.newMetaDataMapLocker.Unlock()
-	indexEntry.LastUsedAt = b.nowTimestamp
-	b.newMetaDataMap[actionID] = indexEntry
+		if diskPath == "" {
+			cacheHitGauge.Set(0, "miss")
+			return
+		}
 
-	return diskPath, &MetaData{
-		OutputID: indexEntry.OutputId,
-		Size:     indexEntry.Size,
-		Timenano: indexEntry.Timenano,
-	}, nil
+		b.newMetaDataMapLocker.Lock()
+		defer b.newMetaDataMapLocker.Unlock()
+		indexEntry.LastUsedAt = b.nowTimestamp
+		b.newMetaDataMap[actionID] = indexEntry
+
+		requestGauge.Set(0, "get")
+		cacheHitGauge.Set(1, "hit")
+
+		metaData = &MetaData{
+			OutputID: indexEntry.OutputId,
+			Size:     indexEntry.Size,
+			Timenano: indexEntry.Timenano,
+		}
+		err = nil
+	}, "get")
+
+	return diskPath, metaData, err
 }
 
 func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
+	requestGauge.Set(1, "put")
+
 	indexEntry := &v1.IndexEntry{
 		OutputId:   outputID,
 		Size:       size,
@@ -189,6 +211,8 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	if _, err := io.Copy(w, localReader); err != nil {
 		return "", fmt.Errorf("copy: %w", err)
 	}
+
+	requestGauge.Set(0, "put")
 
 	return diskPath, nil
 }
