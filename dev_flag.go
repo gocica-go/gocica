@@ -18,6 +18,7 @@ type DevFlag struct {
 	CPUProfFile *os.File     `kong:"-"`
 	MemProf     string       `kong:"optional,help='Memory profile output file',type='path'"`
 	Metrics     string       `kong:"optional,help='Metrics output file',type='path'"`
+	MutexProf   string       `kong:"optional,help='Mutex profile output file',type='path'"`
 	FgProf      string       `kong:"optional,help='fgprof output file',type='path'"`
 	fgprofStop  func() error `kong:"-"`
 }
@@ -42,6 +43,10 @@ func (d *DevFlag) StartProfiling() error {
 		}
 
 		d.fgprofStop = fgprof.Start(f, fgprof.FormatPprof)
+	}
+
+	if d.MutexProf != "" {
+		runtime.SetMutexProfileFraction(1)
 	}
 
 	if d.Metrics != "" {
@@ -76,6 +81,18 @@ func (d *DevFlag) StopProfiling() {
 
 		if err := pprof.WriteHeapProfile(f); err != nil {
 			log.Fatal("could not write memory profile: ", err)
+		}
+	}
+
+	if d.MutexProf != "" {
+		f, err := os.Create(d.MutexProf)
+		if err != nil {
+			log.Fatal("could not create mutex profile file: ", err)
+		}
+		defer f.Close()
+
+		if err := pprof.Lookup("mutex").WriteTo(f, 0); err != nil {
+			log.Fatal("could not write mutex profile: ", err)
 		}
 	}
 
