@@ -19,6 +19,7 @@ type DevFlag struct {
 	MemProf     string       `kong:"optional,help='Memory profile output file',type='path'"`
 	Metrics     string       `kong:"optional,help='Metrics output file',type='path'"`
 	MutexProf   string       `kong:"optional,help='Mutex profile output file',type='path'"`
+	BlockProf   string       `kong:"optional,help='Block profile output file',type='path'"`
 	FgProf      string       `kong:"optional,help='fgprof output file',type='path'"`
 	fgprofStop  func() error `kong:"-"`
 }
@@ -43,6 +44,10 @@ func (d *DevFlag) StartProfiling() error {
 		}
 
 		d.fgprofStop = fgprof.Start(f, fgprof.FormatPprof)
+	}
+
+	if d.BlockProf != "" {
+		runtime.SetBlockProfileRate(1)
 	}
 
 	if d.MutexProf != "" {
@@ -93,6 +98,18 @@ func (d *DevFlag) StopProfiling() {
 
 		if err := pprof.Lookup("mutex").WriteTo(f, 0); err != nil {
 			log.Fatal("could not write mutex profile: ", err)
+		}
+	}
+
+	if d.BlockProf != "" {
+		f, err := os.Create(d.BlockProf)
+		if err != nil {
+			log.Fatal("could not create block profile file: ", err)
+		}
+		defer f.Close()
+
+		if err := pprof.Lookup("block").WriteTo(f, 0); err != nil {
+			log.Fatal("could not write block profile: ", err)
 		}
 	}
 
