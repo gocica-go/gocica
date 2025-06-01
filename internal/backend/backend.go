@@ -93,6 +93,10 @@ func (b *ConbinedBackend) start() {
 		b.metaDataMap = map[string]*v1.IndexEntry{}
 	}
 
+	for _, indexEntry := range b.metaDataMap {
+		b.objectMap[indexEntry.OutputId] = struct{}{}
+	}
+
 	b.newMetaDataMap = make(map[string]*v1.IndexEntry, len(b.metaDataMap))
 	metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
 	for actionID, metaData := range b.metaDataMap {
@@ -109,7 +113,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 	durationGauge.Stopwatch(func() {
 		indexEntry, ok := b.metaDataMap[actionID]
 		if !ok {
-			cacheHitGauge.Set(0, "miss")
+			cacheHitGauge.Set(0, "meta_miss")
 			return
 		}
 
@@ -120,7 +124,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 		}
 
 		if diskPath == "" {
-			cacheHitGauge.Set(0, "miss")
+			cacheHitGauge.Set(0, "local_miss")
 			return
 		}
 
@@ -177,7 +181,9 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 				return
 			}
 
-			return
+			if diskPath != "" {
+				return
+			}
 		}
 
 		var (
