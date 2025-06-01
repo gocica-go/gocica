@@ -23,6 +23,7 @@ jobs:
       matrix:
         id: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
+    needs: [cache_default]
     steps:
       - name: Clear cache
         uses: actions/github-script@v7
@@ -33,6 +34,20 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               key: "gocica-cache-"
+            })
+            for (const cache of caches.data.actions_caches) {
+              console.log(cache)
+              github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id,
+              })
+            }
+            console.log("About to clear setup-go cache")
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              key: "setup-go-"
             })
             for (const cache of caches.data.actions_caches) {
               console.log(cache)
