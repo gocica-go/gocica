@@ -16,41 +16,13 @@ env:
   BUILD_CMD: go build ./cmd/...
 
 jobs:
-  setup_modcache:
-    name: Setup modcache
-    runs-on: ubuntu-latest
-    env:
-      GOMODCACHE: /tmp/gocache/mod
-      GOCACHE: /tmp/gocache/build
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ env.TARGET_REPO }}
-          ref: ${{ env.TARGET_REF }}
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.1
-          cache: false # Disable cache for redundant cache clearing
-      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
-        with:
-          path: ${{ env.GOMODCACHE }}
-          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-mod-${{ runner.os }}-${{ github.ref }}-
-            go-mod-${{ runner.os }}-
-      - run: go mod download
   no_cache_gocica_github:
     name: GoCICa GitHub(No Cache)
     runs-on: ubuntu-latest
-    needs: [setup_modcache]
     strategy:
       matrix:
-        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        id: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
-    env:
-      GOMODCACHE: /tmp/gocache/mod
-      GOCACHE: /tmp/gocache/build
     steps:
       - name: Clear cache
         uses: actions/github-script@v7
@@ -79,32 +51,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false # Disable cache for redundant cache clearing
-      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
-        with:
-          path: ${{ env.GOMODCACHE }}
-          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-mod-${{ runner.os }}-${{ github.ref }}-
-            go-mod-${{ runner.os }}-
-      - uses: gocica-go/gocica-action@v0.1.0-alpha7
+      - uses: gocica-go/gocica-action@v0.1.0-alpha10
         with:
           version: ${{ github.event.inputs.gocica-version }}
-      - run: go mod download
       - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
   cache_gocica_github:
     name: GoCICa GitHub(Cache)
     runs-on: ubuntu-latest
-    needs: [no_cache_gocica_github, setup_modcache]
+    needs: [no_cache_gocica_github]
     strategy:
       matrix:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
-    env:
-      GOMODCACHE: /tmp/gocache/mod
-      GOCACHE: /tmp/gocache/build
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,32 +74,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false # Disable cache for redundant cache clearing
-      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
-        with:
-          path: ${{ env.GOMODCACHE }}
-          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-mod-${{ runner.os }}-${{ github.ref }}-
-            go-mod-${{ runner.os }}-
-      - uses: gocica-go/gocica-action@v0.1.0-alpha7
+      - uses: gocica-go/gocica-action@v0.1.0-alpha10
         with:
           version: ${{ github.event.inputs.gocica-version }}
-      - run: go mod download
       - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
   no_cache_default:
     name: action/cache(No Cache)
     runs-on: ubuntu-latest
-    needs: [setup_modcache]
     strategy:
       matrix:
-        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        id: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
-    env:
-      GOMODCACHE: /tmp/gocache/mod
-      GOCACHE: /tmp/gocache/build
     steps:
       - uses: actions/checkout@v4
         with:
@@ -154,7 +101,7 @@ jobs:
             const caches = await github.rest.actions.getActionsCacheList({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              key: "go-build-"
+              key: "setup-go-"
             })
             for (const cache of caches.data.actions_caches) {
               console.log(cache)
@@ -168,36 +115,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false # Disable cache for redundant cache clearing
-      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
-        with:
-          path: ${{ env.GOMODCACHE }}
-          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-mod-${{ runner.os }}-${{ github.ref }}-
-            go-mod-${{ runner.os }}-
-      - uses: actions/cache@v4 # Go build cache
-        with:
-          path: ${{ env.GOCACHE }}
-          key: go-build-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-build-${{ runner.os }}-${{ github.ref }}-
-            go-build-${{ runner.os }}-
-      - run: go mod download
       - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
   cache_default:
     name: action/cache(Cache)
     runs-on: ubuntu-latest
-    needs: [no_cache_default, setup_modcache]
+    needs: [no_cache_default]
     strategy:
       matrix:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
-    env:
-      GOMODCACHE: /tmp/gocache/mod
-      GOCACHE: /tmp/gocache/build
     steps:
       - uses: actions/checkout@v4
         with:
@@ -207,22 +135,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.24.1
-          cache: false # Disable cache for redundant cache clearing
-      - uses: actions/cache@v4 # Go mod cache(not covered by Go setup cache)
-        with:
-          path: ${{ env.GOMODCACHE }}
-          key: go-mod-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-mod-${{ runner.os }}-${{ github.ref }}-
-            go-mod-${{ runner.os }}-
-      - uses: actions/cache@v4 # Go build cache
-        with:
-          path: ${{ env.GOCACHE }}
-          key: go-build-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            go-build-${{ runner.os }}-${{ github.ref }}-
-            go-build-${{ runner.os }}-
-      - run: go mod download
       - run: time ${{ env.BUILD_CMD }}
         env:
           CGO_ENABLED: 0
