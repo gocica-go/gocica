@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/log"
 )
 
@@ -22,8 +23,8 @@ type Disk struct {
 	objectMap       map[string]*objectLocker
 }
 
-func NewDisk(logger log.Logger, dir string) (*Disk, error) {
-	err := os.MkdirAll(dir, 0755)
+func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
+	err := os.MkdirAll(config.Dir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("create root directory: %w", err)
 	}
@@ -32,7 +33,7 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 
 	disk := &Disk{
 		logger:    logger,
-		rootPath:  dir,
+		rootPath:  config.Dir,
 		objectMap: map[string]*objectLocker{},
 	}
 
