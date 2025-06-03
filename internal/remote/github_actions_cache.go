@@ -13,6 +13,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/internal/local"
 	myhttp "github.com/mazrean/gocica/internal/pkg/http"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
@@ -42,28 +43,30 @@ type GitHubActionsCache struct {
 
 func NewGitHubActionsCache(
 	logger log.Logger,
-	token string,
-	strBaseURL string,
-	runnerOS, ref, sha string,
+	config *config.Config,
 	localBackend local.Backend,
 ) (*GitHubActionsCache, error) {
-	baseURL, err := url.Parse(strBaseURL)
+	if config.Github.Token == "" {
+		return nil, fmt.Errorf("GitHub token is not specified")
+	}
+
+	baseURL, err := url.Parse(config.Github.CacheURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
 	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
-		AccessToken: token,
+		AccessToken: config.Github.Token,
 	}))
 
 	c := &GitHubActionsCache{
 		logger:       logger,
 		githubClient: githubClient,
 		baseURL:      baseURL,
-		runnerOS:     runnerOS,
-		ref:          ref,
-		sha:          sha,
+		runnerOS:     config.Github.RunnerOS,
+		ref:          config.Github.Ref,
+		sha:          config.Github.Sha,
 	}
 
 	downloadURL, err := c.setupDownloader(context.Background())

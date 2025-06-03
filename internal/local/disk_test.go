@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/log"
 )
 
@@ -43,7 +44,7 @@ func TestNewDisk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := tt.setup(t)
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 
 			if tt.wantErr {
 				if err == nil {
@@ -129,7 +130,7 @@ func TestDisk_Get(t *testing.T) {
 				}
 			}
 
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +215,7 @@ func TestDisk_Put(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
