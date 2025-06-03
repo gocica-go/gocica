@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 
 	"github.com/alecthomas/kong"
-	"github.com/mazrean/gocica/internal"
-	"github.com/mazrean/gocica/internal/backend"
+	"github.com/mazrean/gocica/internal/cacheprog"
+	"github.com/mazrean/gocica/internal/local"
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
+	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 )
@@ -65,21 +66,21 @@ func loadConfig() (*kong.Context, error) {
 	return ctx, nil
 }
 
-func createBackend(logger log.Logger) (backend.Backend, error) {
+func createBackend(logger log.Logger) (cacheprog.Backend, error) {
 	// Initialize backend storage
-	diskBackend, err := backend.NewDisk(logger, CLI.Dir)
+	diskBackend, err := local.NewDisk(logger, CLI.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create backend: %w", err)
 	}
 
-	var remoteBackend backend.RemoteBackend
+	var remoteBackend remote.Backend
 	// If GitHub token is not specified, use disk backend only
 	if CLI.Github.Token == "" {
 		return nil, fmt.Errorf("GitHub token is not specified")
 	}
 
 	// Initialize GitHub Actions Cache backend
-	remoteBackend, err = backend.NewGitHubActionsCache(
+	remoteBackend, err = remote.NewGitHubActionsCache(
 		logger,
 		CLI.Github.Token,
 		CLI.Github.CacheURL,
@@ -91,7 +92,7 @@ func createBackend(logger log.Logger) (backend.Backend, error) {
 	}
 
 	// Initialize combined backend
-	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend, remoteBackend)
+	combinedBackend, err := cacheprog.NewConbinedBackend(logger, diskBackend, remoteBackend)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create combined backend: %w", err)
 	}
@@ -142,7 +143,7 @@ func main() {
 		logger.Warnf("failed to create backend: %v. no cache will be used.", err)
 	} else {
 		// Create application instance
-		app := internal.NewGocica(logger, backend)
+		app := cacheprog.NewGocica(logger, backend)
 
 		options = append(options,
 			protocol.WithGetHandler(app.Get),
