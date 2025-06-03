@@ -1,4 +1,4 @@
-package backend
+package local
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/mazrean/gocica/log"
 )
 
-var _ LocalBackend = &Disk{}
+var _ Backend = &Disk{}
 
 type Disk struct {
 	logger   log.Logger

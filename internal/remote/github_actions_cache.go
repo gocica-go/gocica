@@ -1,4 +1,4 @@
-package backend
+package remote
 
 import (
 	"bytes"
@@ -13,17 +13,18 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
-	"github.com/mazrean/gocica/internal/backend/blob"
+	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/metrics"
 	myhttp "github.com/mazrean/gocica/internal/pkg/http"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
 )
 
-var _ RemoteBackend = &GitHubActionsCache{}
+var _ Backend = &GitHubActionsCache{}
 
 var latencyGauge = metrics.NewGauge("github_actions_cache_latency")
 
@@ -44,7 +45,7 @@ func NewGitHubActionsCache(
 	token string,
 	strBaseURL string,
 	runnerOS, ref, sha string,
-	localBackend LocalBackend,
+	localBackend local.Backend,
 ) (*GitHubActionsCache, error) {
 	baseURL, err := url.Parse(strBaseURL)
 	if err != nil {

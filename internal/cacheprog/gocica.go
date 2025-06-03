@@ -1,24 +1,23 @@
-package internal
+package cacheprog
 
 import (
 	"context"
 	"fmt"
 	"sync/atomic"
 
-	"github.com/mazrean/gocica/internal/backend"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 )
 
 type Gocica struct {
 	logger    log.Logger
-	backend   backend.Backend
+	backend   Backend
 	hitCount  uint64
 	missCount uint64
 	putCount  uint64
 }
 
-func NewGocica(logger log.Logger, backend backend.Backend) *Gocica {
+func NewGocica(logger log.Logger, backend Backend) *Gocica {
 	return &Gocica{logger: logger, backend: backend}
 }
 
