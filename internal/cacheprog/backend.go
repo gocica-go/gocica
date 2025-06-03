@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/mazrean/gocica/internal/local"
-	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/log"

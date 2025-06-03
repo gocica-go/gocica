@@ -11,8 +11,8 @@ import (
 	"sync"
 
 	"github.com/DataDog/zstd"
-	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
