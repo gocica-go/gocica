@@ -11,14 +11,38 @@ import (
 
 type CacheProg struct {
 	logger    log.Logger
+	process   *protocol.Process
 	backend   Backend
 	hitCount  uint64
 	missCount uint64
 	putCount  uint64
 }
 
+// NewCacheProg creates a new CacheProg instance
+// backend is nil if no cache is used
 func NewCacheProg(logger log.Logger, backend Backend) *CacheProg {
-	return &CacheProg{logger: logger, backend: backend}
+	cacheProg := &CacheProg{
+		logger:  logger,
+		backend: backend,
+	}
+
+	options := make([]protocol.ProcessOption, 0, 4)
+	options = append(options, protocol.WithLogger(logger))
+	if backend != nil {
+		options = append(options,
+			protocol.WithGetHandler(cacheProg.Get),
+			protocol.WithPutHandler(cacheProg.Put),
+			protocol.WithCloseHandler(cacheProg.Close),
+		)
+	}
+
+	cacheProg.process = protocol.NewProcess(options...)
+
+	return cacheProg
+}
+
+func (cp *CacheProg) Run() error {
+	return cp.process.Run()
 }
 
 func (cp *CacheProg) Get(ctx context.Context, req *protocol.Request, res *protocol.Response) error {

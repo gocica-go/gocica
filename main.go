@@ -11,7 +11,7 @@ import (
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
 	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/log"
-	"github.com/mazrean/gocica/protocol"
+	"golang.org/x/sync/errgroup"
 )
 
 //go:generate go tool buf generate
@@ -133,29 +133,21 @@ func main() {
 
 	logger.Debugf("configuration: %+v", CLI)
 
-	options := make([]protocol.ProcessOption, 0, 4)
-	options = append(options, protocol.WithLogger(logger))
-
 	// Initialize backend
 	backend, err := createBackend(logger)
 	if err != nil {
 		// If backend initialization failed, no cache will be used
 		logger.Warnf("failed to create backend: %v. no cache will be used.", err)
-	} else {
-		// Create application instance
-		app := cacheprog.NewCacheProg(logger, backend)
-
-		options = append(options,
-			protocol.WithGetHandler(app.Get),
-			protocol.WithPutHandler(app.Put),
-			protocol.WithCloseHandler(app.Close),
-		)
+		backend = nil
 	}
 
-	// Initialize and run process
-	process := protocol.NewProcess(options...)
+	eg := errgroup.Group{}
+	eg.Go(func() error {
+		cacheProg := cacheprog.NewCacheProg(logger, backend)
+		return cacheProg.Run()
+	})
 
-	if err := process.Run(); err != nil {
-		panic(fmt.Errorf("unexpected error: failed to run process: %w", err))
+	if err := eg.Wait(); err != nil {
+		panic(fmt.Errorf("unexpected error: %w", err))
 	}
 }
