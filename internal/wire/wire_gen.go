@@ -18,7 +18,7 @@ import (
 
 // Injectors from wire.go:
 
-func InjectApp(version config.Version) (*App, error) {
+func InjectApp(version config.CmdInfo) (*App, error) {
 	configConfig, err := config.Load(version)
 	if err != nil {
 		return nil, err

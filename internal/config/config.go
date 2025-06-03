@@ -22,17 +22,19 @@ type Config struct {
 	Dev DevFlag `kong:"group='dev',embed,prefix='dev.'"`
 }
 
-type Version struct {
-	Version  string
-	Revision string
+type CmdInfo struct {
+	Name        string
+	Description string
+	Version     string
+	Revision    string
 }
 
-func Load(version Version) (*Config, error) {
+func Load(version CmdInfo) (*Config, error) {
 	config := &Config{}
 	// Parse command line arguments
 	parser := kong.Must(config,
-		kong.Name("gocica"),
-		kong.Description("A fast GOCACHEPROG implementation for CI"),
+		kong.Name(version.Name),
+		kong.Description(version.Description),
 		kong.Vars{"version": fmt.Sprintf("%s (%s)", version.Version, version.Revision)},
 		kong.UsageOnError(),
 	)

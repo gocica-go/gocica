@@ -11,12 +11,19 @@ import (
 //go:generate go tool buf generate
 
 var (
-	version  = "dev"
-	revision = "none"
+	name        = "gocica"
+	description = "Go Compiler Cache for GitHub Actions"
+	version     = "dev"
+	revision    = "none"
 )
 
 func main() {
-	app, err := wire.InjectApp(config.Version{Version: version, Revision: revision})
+	app, err := wire.InjectApp(config.CmdInfo{
+		Name:        name,
+		Description: description,
+		Version:     version,
+		Revision:    revision,
+	})
 	if err != nil {
 		log.DefaultLogger.Errorf("failed to create app: %v", err)
 		os.Exit(1)
