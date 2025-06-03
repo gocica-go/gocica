@@ -143,7 +143,7 @@ func main() {
 		logger.Warnf("failed to create backend: %v. no cache will be used.", err)
 	} else {
 		// Create application instance
-		app := cacheprog.NewGocica(logger, backend)
+		app := cacheprog.NewCacheProg(logger, backend)
 
 		options = append(options,
 			protocol.WithGetHandler(app.Get),
