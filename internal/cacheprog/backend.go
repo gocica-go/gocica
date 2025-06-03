@@ -1,16 +1,17 @@
-package backend
+package cacheprog
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/metrics"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -19,19 +20,6 @@ import (
 type Backend interface {
 	Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error)
 	Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error)
-	Close(ctx context.Context) error
-}
-
-type LocalBackend interface {
-	Get(ctx context.Context, outputID string) (diskPath string, err error)
-	Put(ctx context.Context, outputID string, size int64) (diskPath string, w io.WriteCloser, err error)
-	Close(ctx context.Context) error
-}
-
-type RemoteBackend interface {
-	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
-	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
-	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
 	Close(ctx context.Context) error
 }
 
@@ -55,8 +43,8 @@ var (
 type ConbinedBackend struct {
 	logger log.Logger
 
-	local  LocalBackend
-	remote RemoteBackend
+	local  local.Backend
+	remote remote.Backend
 
 	objectMapLocker sync.Mutex
 	objectMap       map[string]struct{}
@@ -68,7 +56,7 @@ type ConbinedBackend struct {
 	newMetaDataMap       map[string]*v1.IndexEntry
 }
 
-func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBackend) (*ConbinedBackend, error) {
+func NewConbinedBackend(logger log.Logger, local local.Backend, remote remote.Backend) (*ConbinedBackend, error) {
 	conbined := &ConbinedBackend{
 		logger:       logger,
 		eg:           &errgroup.Group{},
@@ -252,8 +240,4 @@ func (b *ConbinedBackend) Close(ctx context.Context) (err error) {
 	}, "close")
 
 	return err
-}
-
-func encodeID(id string) string {
-	return strings.ReplaceAll(id, "/", "-")
 }
