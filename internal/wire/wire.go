@@ -14,19 +14,32 @@ import (
 )
 
 type App struct {
-	*cacheprog.CacheProg
+	logger    log.Logger
+	config    *config.Config
+	cacheprog *cacheprog.CacheProg
 }
 
-func newApp(cacheprog *cacheprog.CacheProg) *App {
+func newApp(
+	logger log.Logger,
+	config *config.Config,
+	cacheprog *cacheprog.CacheProg,
+) *App {
 	return &App{
-		CacheProg: cacheprog,
+		logger:    logger,
+		config:    config,
+		cacheprog: cacheprog,
 	}
 }
 
 func (a *App) Run() error {
+	if err := a.config.Dev.StartProfiling(); err != nil {
+		a.logger.Warnf("failed to start profiling: %v", err)
+	}
+	defer a.config.Dev.StopProfiling()
+
 	eg := errgroup.Group{}
 	eg.Go(func() error {
-		return a.CacheProg.Run()
+		return a.cacheprog.Run()
 	})
 
 	if err := eg.Wait(); err != nil {
@@ -53,7 +66,7 @@ func newLogger(config *config.Config) log.Logger {
 	return log.DefaultLogger
 }
 
-func InjectApp(version config.Version) (*App, error) {
+func InjectApp(cmdInfo config.CmdInfo) (*App, error) {
 	wire.Build(
 		newLogger,
 		config.Load,
