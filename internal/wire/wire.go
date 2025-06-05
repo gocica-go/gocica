@@ -58,6 +58,7 @@ func newLogger(config *config.Config) log.Logger {
 	case "warn":
 		return mylog.NewLogger(mylog.Warn)
 	case "info":
+		return mylog.NewLogger(mylog.Info)
 	case "debug":
 		return mylog.NewLogger(mylog.Debug)
 	}
