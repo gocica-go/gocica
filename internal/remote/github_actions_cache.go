@@ -79,6 +79,7 @@ func NewGitHubActionsCache(
 		ref:            config.Github.Ref,
 		sha:            config.Github.Sha,
 		nowTimestamp:   timestamppb.Now(),
+		metaDataMap:    make(map[string]*v1.IndexEntry),
 		newMetaDataMap: make(map[string]*v1.IndexEntry),
 	}
 	closer.Add(c.Close)
@@ -104,15 +105,13 @@ func NewGitHubActionsCache(
 			}
 		}()
 
-		metaDataMap, err := c.downloader.GetEntries(ctx)
+		c.metaDataMap, err = c.downloader.GetEntries(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("get entries: %w", err)
 		}
-		c.metaDataMap = metaDataMap
 
-		c.newMetaDataMap = make(map[string]*v1.IndexEntry, len(metaDataMap))
 		metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
-		for actionID, entry := range metaDataMap {
+		for actionID, entry := range c.metaDataMap {
 			if entry.LastUsedAt.AsTime().After(metaLimitLastUsedAt) {
 				c.newMetaDataMap[actionID] = entry
 			}
@@ -141,7 +140,7 @@ var (
 func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error) {
 	blobKey, restoreKeys := c.blobKey()
 
-	downloadURL, err := c.getDownloadURL(context.Background(), blobKey, restoreKeys)
+	downloadURL, err := c.getDownloadURL(ctx, blobKey, restoreKeys)
 	if err != nil {
 		c.logger.Debugf("get download url: %v", err)
 		c.logger.Infof("cache not found, creating new cache entry")
@@ -190,7 +189,7 @@ func (c *GitHubActionsCache) setupUploader(ctx context.Context, downloadURL stri
 // actionsCacheVersion is sha256 of the context.
 // upstream uses paths in actionsCacheVersion, we don't seem to have anything that is unique like this.
 // so we use the sha256 of "gocica-cache-1.0" as a actionsCacheVersion.
-var actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053f746fae0287"
+const actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053f746fae0287"
 
 var (
 	errActionsCacheNotFound = errors.New("cache not found")
@@ -319,18 +318,14 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 }
 
 func (c *GitHubActionsCache) MetaData(_ context.Context, actionID string) (*MetaData, error) {
-	if c.metaDataMap == nil {
-		return nil, nil
-	}
-
 	entry, ok := c.metaDataMap[actionID]
 	if !ok {
 		return nil, nil
 	}
 
-	entry.LastUsedAt = c.nowTimestamp
 	c.newMetaDataMapLocker.Lock()
 	defer c.newMetaDataMapLocker.Unlock()
+	entry.LastUsedAt = c.nowTimestamp
 	c.newMetaDataMap[actionID] = entry
 
 	return &MetaData{
