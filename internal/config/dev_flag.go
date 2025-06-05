@@ -10,7 +10,7 @@ import (
 	"runtime/pprof"
 
 	"github.com/felixge/fgprof"
-	"github.com/mazrean/gocica/internal/metrics"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
 )
 
 type DevFlag struct {
