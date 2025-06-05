@@ -8,7 +8,7 @@ import (
 )
 
 var cacheprogSet = wire.NewSet(
-	wire.Bind(new(cacheprog.Backend), new(*cacheprog.ConbinedBackend)),
-	cacheprog.NewConbinedBackend,
+	wire.Bind(new(cacheprog.Backend), new(*cacheprog.CombinedBackend)),
+	cacheprog.NewCombinedBackend,
 	cacheprog.NewCacheProg,
 )

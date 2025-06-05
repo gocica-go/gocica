@@ -32,11 +32,11 @@ func InjectApp(cmdInfo config.CmdInfo) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	conbinedBackend, err := cacheprog.NewConbinedBackend(logger, disk, gitHubActionsCache)
+	combinedBackend, err := cacheprog.NewCombinedBackend(logger, disk, gitHubActionsCache)
 	if err != nil {
 		return nil, err
 	}
-	cacheProg := cacheprog.NewCacheProg(logger, conbinedBackend)
+	cacheProg := cacheprog.NewCacheProg(logger, combinedBackend)
 	app := newApp(logger, configConfig, cacheProg)
 	return app, nil
 }
@@ -86,6 +86,7 @@ func newLogger(config2 *config.Config) log.Logger {
 	case "warn":
 		return log2.NewLogger(log2.Warn)
 	case "info":
+		return log2.NewLogger(log2.Info)
 	case "debug":
 		return log2.NewLogger(log2.Debug)
 	}
