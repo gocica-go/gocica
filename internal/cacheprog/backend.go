@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/mazrean/gocica/internal/closer"
 	"github.com/mazrean/gocica/internal/local"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
@@ -176,17 +177,10 @@ func (b *ConbinedBackend) Close(ctx context.Context) (err error) {
 			return
 		}
 
-		if closeErr := b.remote.Close(ctx); closeErr != nil {
-			err = fmt.Errorf("close remote backend: %w", closeErr)
+		if closeErr := closer.Close(ctx); closeErr != nil {
+			err = fmt.Errorf("close closer: %w", closeErr)
 			return
 		}
-
-		if closeErr := b.local.Close(ctx); closeErr != nil {
-			err = fmt.Errorf("close backend: %w", closeErr)
-			return
-		}
-
-		requestGauge.Set(0, "close")
 	}, "close")
 
 	return err

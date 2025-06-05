@@ -15,6 +15,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/mazrean/gocica/internal/closer"
 	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/internal/local"
 	myhttp "github.com/mazrean/gocica/internal/pkg/http"
@@ -71,14 +72,16 @@ func NewGitHubActionsCache(
 	}))
 
 	c := &GitHubActionsCache{
-		logger:       logger,
-		githubClient: githubClient,
-		baseURL:      baseURL,
-		runnerOS:     config.Github.RunnerOS,
-		ref:          config.Github.Ref,
-		sha:          config.Github.Sha,
-		nowTimestamp: timestamppb.Now(),
+		logger:         logger,
+		githubClient:   githubClient,
+		baseURL:        baseURL,
+		runnerOS:       config.Github.RunnerOS,
+		ref:            config.Github.Ref,
+		sha:            config.Github.Sha,
+		nowTimestamp:   timestamppb.Now(),
+		newMetaDataMap: make(map[string]*v1.IndexEntry),
 	}
+	closer.Add(c.Close)
 
 	downloadURL, err := c.setupDownloader(ctx)
 	if err != nil {
