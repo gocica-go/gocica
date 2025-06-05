@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/mazrean/gocica/internal/closer"
 	"github.com/mazrean/gocica/internal/local"
@@ -44,19 +43,15 @@ type CombinedBackend struct {
 	local  local.Backend
 	remote remote.Backend
 
-	objectMapLocker sync.Mutex
-	objectMap       map[string]struct{}
-
 	eg *errgroup.Group
 }
 
 func NewCombinedBackend(logger log.Logger, local local.Backend, remote remote.Backend) (*CombinedBackend, error) {
 	combined := &CombinedBackend{
-		logger:    logger,
-		eg:        &errgroup.Group{},
-		objectMap: map[string]struct{}{},
-		local:     local,
-		remote:    remote,
+		logger: logger,
+		eg:     &errgroup.Group{},
+		local:  local,
+		remote: remote,
 	}
 
 	return combined, nil
@@ -108,26 +103,14 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	defer requestGauge.Set(0, "put")
 
 	durationGauge.Stopwatch(func() {
-		var ok bool
-		func() {
-			b.objectMapLocker.Lock()
-			defer b.objectMapLocker.Unlock()
+		diskPath, err = b.local.Get(ctx, outputID)
+		if err != nil {
+			err = fmt.Errorf("get local cache: %w", err)
+			return
+		}
 
-			_, ok = b.objectMap[outputID]
-			if !ok {
-				b.objectMap[outputID] = struct{}{}
-			}
-		}()
-		if ok {
-			diskPath, err = b.local.Get(ctx, outputID)
-			if err != nil {
-				err = fmt.Errorf("get local cache: %w", err)
-				return
-			}
-
-			if diskPath != "" {
-				return
-			}
+		if diskPath != "" {
+			return
 		}
 
 		var (
