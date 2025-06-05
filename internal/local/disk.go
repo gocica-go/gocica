@@ -120,7 +120,3 @@ func (w *WriteCloserWithUnlock) Close() error {
 func (d *Disk) objectFilePath(id string) string {
 	return filepath.Join(d.rootPath, fmt.Sprintf("o-%s", encodeID(id)))
 }
-
-func (d *Disk) Close(context.Context) error {
-	return nil
-}

@@ -18,5 +18,4 @@ type Backend interface {
 	// Put uploads the object to the backend.
 	// If the object already exists, it overwrites the object.
 	Put(ctx context.Context, actionID, objectID string, size int64, r io.ReadSeeker) error
-	Close(ctx context.Context) error
 }
