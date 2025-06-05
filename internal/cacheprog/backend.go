@@ -30,7 +30,7 @@ type MetaData struct {
 	Timenano int64
 }
 
-var _ Backend = &ConbinedBackend{}
+var _ Backend = &CombinedBackend{}
 
 var (
 	requestGauge  = metrics.NewGauge("backend_request")
@@ -38,7 +38,7 @@ var (
 	cacheHitGauge = metrics.NewGauge("backend_cache_hit")
 )
 
-type ConbinedBackend struct {
+type CombinedBackend struct {
 	logger log.Logger
 
 	local  local.Backend
@@ -50,8 +50,8 @@ type ConbinedBackend struct {
 	eg *errgroup.Group
 }
 
-func NewConbinedBackend(logger log.Logger, local local.Backend, remote remote.Backend) (*ConbinedBackend, error) {
-	conbined := &ConbinedBackend{
+func NewCombinedBackend(logger log.Logger, local local.Backend, remote remote.Backend) (*CombinedBackend, error) {
+	combined := &CombinedBackend{
 		logger:    logger,
 		eg:        &errgroup.Group{},
 		objectMap: map[string]struct{}{},
@@ -59,10 +59,10 @@ func NewConbinedBackend(logger log.Logger, local local.Backend, remote remote.Ba
 		remote:    remote,
 	}
 
-	return conbined, nil
+	return combined, nil
 }
 
-func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
+func (b *CombinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
 	requestGauge.Set(1, "get")
 	defer requestGauge.Set(0, "get")
 
@@ -103,7 +103,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 	return diskPath, metaData, err
 }
 
-func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
+func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
 	requestGauge.Set(1, "put")
 	defer requestGauge.Set(0, "put")
 
@@ -167,7 +167,7 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	return diskPath, err
 }
 
-func (b *ConbinedBackend) Close(ctx context.Context) (err error) {
+func (b *CombinedBackend) Close(ctx context.Context) (err error) {
 	requestGauge.Set(1, "close")
 	defer requestGauge.Set(0, "close")
 
