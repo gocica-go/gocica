@@ -18,8 +18,8 @@ import (
 
 // Injectors from wire.go:
 
-func InjectApp(version config.CmdInfo) (*App, error) {
-	configConfig, err := config.Load(version)
+func InjectApp(cmdInfo config.CmdInfo) (*App, error) {
+	configConfig, err := config.Load(cmdInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -37,26 +37,37 @@ func InjectApp(version config.CmdInfo) (*App, error) {
 		return nil, err
 	}
 	cacheProg := cacheprog.NewCacheProg(logger, conbinedBackend)
-	app := newApp(cacheProg)
+	app := newApp(logger, configConfig, cacheProg)
 	return app, nil
 }
 
 // wire.go:
 
 type App struct {
-	*cacheprog.CacheProg
+	logger    log.Logger
+	config    *config.Config
+	cacheprog *cacheprog.CacheProg
 }
 
-func newApp(cacheprog2 *cacheprog.CacheProg) *App {
+func newApp(
+	logger log.Logger, config2 *config.Config, cacheprog2 *cacheprog.CacheProg,
+) *App {
 	return &App{
-		CacheProg: cacheprog2,
+		logger:    logger,
+		config:    config2,
+		cacheprog: cacheprog2,
 	}
 }
 
 func (a *App) Run() error {
+	if err := a.config.Dev.StartProfiling(); err != nil {
+		a.logger.Warnf("failed to start profiling: %v", err)
+	}
+	defer a.config.Dev.StopProfiling()
+
 	eg := errgroup.Group{}
 	eg.Go(func() error {
-		return a.CacheProg.Run()
+		return a.cacheprog.Run()
 	})
 
 	if err := eg.Wait(); err != nil {

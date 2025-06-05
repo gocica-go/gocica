@@ -58,3 +58,11 @@ func Load(version CmdInfo) (*Config, error) {
 
 	return config, nil
 }
+
+func (c *Config) StartProfiling() error {
+	return c.Dev.StartProfiling()
+}
+
+func (c *Config) StopProfiling() {
+	c.Dev.StopProfiling()
+}
