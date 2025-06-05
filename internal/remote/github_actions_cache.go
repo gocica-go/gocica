@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
@@ -23,6 +25,7 @@ import (
 	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var _ Backend = &GitHubActionsCache{}
@@ -38,6 +41,11 @@ type GitHubActionsCache struct {
 	uploader   *blob.Uploader
 	downloader *blob.Downloader
 
+	metaDataMap          map[string]*v1.IndexEntry
+	newMetaDataMapLocker sync.RWMutex
+	newMetaDataMap       map[string]*v1.IndexEntry
+	nowTimestamp         *timestamppb.Timestamp
+
 	runnerOS, ref, sha string
 }
 
@@ -46,6 +54,8 @@ func NewGitHubActionsCache(
 	config *config.Config,
 	localBackend local.Backend,
 ) (*GitHubActionsCache, error) {
+	ctx := context.Background()
+
 	if config.Github.Token == "" {
 		return nil, fmt.Errorf("GitHub token is not specified")
 	}
@@ -56,7 +66,7 @@ func NewGitHubActionsCache(
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
-	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
+	githubClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: config.Github.Token,
 	}))
 
@@ -67,27 +77,43 @@ func NewGitHubActionsCache(
 		runnerOS:     config.Github.RunnerOS,
 		ref:          config.Github.Ref,
 		sha:          config.Github.Sha,
+		nowTimestamp: timestamppb.Now(),
 	}
 
-	downloadURL, err := c.setupDownloader(context.Background())
+	downloadURL, err := c.setupDownloader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("setup downloader: %w", err)
 	}
 
-	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
+	if err := c.setupUploader(ctx, downloadURL); err != nil {
 		return nil, fmt.Errorf("setup uploader: %w", err)
 	}
 
 	if c.downloader != nil {
 		// Download all output blocks in the background.
 		go func() {
-			if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
+			ctx := context.Background()
+			if err := c.downloader.DownloadAllOutputBlocks(ctx, func(ctx context.Context, objectID string) (io.WriteCloser, error) {
 				_, w, err := localBackend.Put(ctx, objectID, 0)
 				return w, err
 			}); err != nil {
 				logger.Errorf("download all output blocks: %v", err)
 			}
 		}()
+
+		metaDataMap, err := c.downloader.GetEntries(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("get entries: %w", err)
+		}
+		c.metaDataMap = metaDataMap
+
+		c.newMetaDataMap = make(map[string]*v1.IndexEntry, len(metaDataMap))
+		metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
+		for actionID, entry := range metaDataMap {
+			if entry.LastUsedAt.AsTime().After(metaLimitLastUsedAt) {
+				c.newMetaDataMap[actionID] = entry
+			}
+		}
 	}
 
 	logger.Infof("GitHub Actions cache backend initialized.")
@@ -289,45 +315,44 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 	return nil
 }
 
-func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
-	if c.downloader == nil {
-		return map[string]*v1.IndexEntry{}, nil
+func (c *GitHubActionsCache) MetaData(_ context.Context, actionID string) (*MetaData, error) {
+	if c.metaDataMap == nil {
+		return nil, nil
 	}
 
-	entries, err := c.downloader.GetEntries(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get entries: %w", err)
+	entry, ok := c.metaDataMap[actionID]
+	if !ok {
+		return nil, nil
 	}
 
-	return entries, nil
+	entry.LastUsedAt = c.nowTimestamp
+	c.newMetaDataMapLocker.Lock()
+	defer c.newMetaDataMapLocker.Unlock()
+	c.newMetaDataMap[actionID] = entry
+
+	return &MetaData{
+		OutputID: entry.OutputId,
+		Size:     entry.Size,
+		Timenano: entry.Timenano,
+	}, nil
 }
 
-func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	if c.uploader == nil {
-		return nil
-	}
-
-	key, _ := c.blobKey()
-
-	size, err := c.uploader.Commit(ctx, metaDataMap)
-	if err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-
-	if err := c.commitCacheEntry(ctx, key, size); err != nil {
-		return fmt.Errorf("commit cache entry: %w", err)
-	}
-
-	return nil
-}
-
-func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
+func (c *GitHubActionsCache) Put(ctx context.Context, actionID, objectID string, size int64, r io.ReadSeeker) error {
 	if c.uploader == nil {
 		return nil
 	}
 
 	if err := c.uploader.UploadOutput(ctx, objectID, size, myio.NopSeekCloser(r)); err != nil {
 		return fmt.Errorf("upload output: %w", err)
+	}
+
+	c.newMetaDataMapLocker.Lock()
+	defer c.newMetaDataMapLocker.Unlock()
+	c.newMetaDataMap[actionID] = &v1.IndexEntry{
+		OutputId:   objectID,
+		Size:       size,
+		Timenano:   time.Now().UnixNano(),
+		LastUsedAt: c.nowTimestamp,
 	}
 
 	return nil
@@ -346,6 +371,24 @@ func (c *GitHubActionsCache) blobKey() (string, []string) {
 	return baseKey, restoreKeys
 }
 
-func (c *GitHubActionsCache) Close(context.Context) error {
+func (c *GitHubActionsCache) Close(ctx context.Context) error {
+	if c.uploader == nil {
+		return nil
+	}
+
+	c.newMetaDataMapLocker.RLock()
+	defer c.newMetaDataMapLocker.RUnlock()
+
+	key, _ := c.blobKey()
+
+	size, err := c.uploader.Commit(ctx, c.newMetaDataMap)
+	if err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	if err := c.commitCacheEntry(ctx, key, size); err != nil {
+		return fmt.Errorf("commit cache entry: %w", err)
+	}
+
 	return nil
 }

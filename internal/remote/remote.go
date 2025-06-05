@@ -3,13 +3,20 @@ package remote
 import (
 	"context"
 	"io"
-
-	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 )
 
+type MetaData struct {
+	OutputID string
+	Size     int64
+	Timenano int64
+}
+
 type Backend interface {
-	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
-	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
-	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
+	// MetaData returns the metadata of the object.
+	// If the object is not found, it returns nil.
+	MetaData(ctx context.Context, actionID string) (*MetaData, error)
+	// Put uploads the object to the backend.
+	// If the object already exists, it overwrites the object.
+	Put(ctx context.Context, actionID, objectID string, size int64, r io.ReadSeeker) error
 	Close(ctx context.Context) error
 }

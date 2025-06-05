@@ -5,16 +5,13 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/mazrean/gocica/internal/local"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
-	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type Backend interface {
@@ -49,49 +46,19 @@ type ConbinedBackend struct {
 	objectMapLocker sync.Mutex
 	objectMap       map[string]struct{}
 
-	eg                   *errgroup.Group
-	nowTimestamp         *timestamppb.Timestamp
-	metaDataMap          map[string]*v1.IndexEntry
-	newMetaDataMapLocker sync.Mutex
-	newMetaDataMap       map[string]*v1.IndexEntry
+	eg *errgroup.Group
 }
 
 func NewConbinedBackend(logger log.Logger, local local.Backend, remote remote.Backend) (*ConbinedBackend, error) {
 	conbined := &ConbinedBackend{
-		logger:       logger,
-		eg:           &errgroup.Group{},
-		objectMap:    map[string]struct{}{},
-		local:        local,
-		remote:       remote,
-		nowTimestamp: timestamppb.Now(),
+		logger:    logger,
+		eg:        &errgroup.Group{},
+		objectMap: map[string]struct{}{},
+		local:     local,
+		remote:    remote,
 	}
-
-	conbined.start()
 
 	return conbined, nil
-}
-
-func (b *ConbinedBackend) start() {
-	var err error
-	b.metaDataMap, err = b.remote.MetaData(context.Background())
-	if err != nil {
-		b.logger.Warnf("parse remote metadata: %v. ignore the all remote cache.", err)
-	}
-	if b.metaDataMap == nil {
-		b.metaDataMap = map[string]*v1.IndexEntry{}
-	}
-
-	for _, indexEntry := range b.metaDataMap {
-		b.objectMap[indexEntry.OutputId] = struct{}{}
-	}
-
-	b.newMetaDataMap = make(map[string]*v1.IndexEntry, len(b.metaDataMap))
-	metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
-	for actionID, metaData := range b.metaDataMap {
-		if metaData.LastUsedAt.AsTime().After(metaLimitLastUsedAt) {
-			b.newMetaDataMap[actionID] = metaData
-		}
-	}
 }
 
 func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
@@ -99,13 +66,19 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 	defer requestGauge.Set(0, "get")
 
 	durationGauge.Stopwatch(func() {
-		indexEntry, ok := b.metaDataMap[actionID]
-		if !ok {
+		var indexEntry *remote.MetaData
+		indexEntry, err = b.remote.MetaData(ctx, actionID)
+		if err != nil {
+			err = fmt.Errorf("get remote metadata: %w", err)
+			return
+		}
+
+		if indexEntry == nil {
 			cacheHitGauge.Set(0, "meta_miss")
 			return
 		}
 
-		diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
+		diskPath, err = b.local.Get(ctx, indexEntry.OutputID)
 		if err != nil {
 			err = fmt.Errorf("get local cache: %w", err)
 			return
@@ -116,15 +89,10 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 			return
 		}
 
-		b.newMetaDataMapLocker.Lock()
-		defer b.newMetaDataMapLocker.Unlock()
-		indexEntry.LastUsedAt = b.nowTimestamp
-		b.newMetaDataMap[actionID] = indexEntry
-
 		cacheHitGauge.Set(1, "hit")
 
 		metaData = &MetaData{
-			OutputID: indexEntry.OutputId,
+			OutputID: indexEntry.OutputID,
 			Size:     indexEntry.Size,
 			Timenano: indexEntry.Timenano,
 		}
@@ -139,19 +107,6 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	defer requestGauge.Set(0, "put")
 
 	durationGauge.Stopwatch(func() {
-		indexEntry := &v1.IndexEntry{
-			OutputId:   outputID,
-			Size:       size,
-			Timenano:   time.Now().UnixNano(),
-			LastUsedAt: b.nowTimestamp,
-		}
-
-		func() {
-			b.newMetaDataMapLocker.Lock()
-			defer b.newMetaDataMapLocker.Unlock()
-			b.newMetaDataMap[actionID] = indexEntry
-		}()
-
 		var ok bool
 		func() {
 			b.objectMapLocker.Lock()
@@ -187,7 +142,7 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		}
 
 		b.eg.Go(func() error {
-			if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
+			if err := b.remote.Put(context.Background(), actionID, outputID, size, remoteReader); err != nil {
 				return fmt.Errorf("put remote cache: %w", err)
 			}
 
@@ -218,11 +173,6 @@ func (b *ConbinedBackend) Close(ctx context.Context) (err error) {
 	durationGauge.Stopwatch(func() {
 		if waitErr := b.eg.Wait(); waitErr != nil {
 			err = fmt.Errorf("wait for all tasks: %w", waitErr)
-			return
-		}
-
-		if writeErr := b.remote.WriteMetaData(context.Background(), b.newMetaDataMap); writeErr != nil {
-			err = fmt.Errorf("write remote metadata: %w", writeErr)
 			return
 		}
 
