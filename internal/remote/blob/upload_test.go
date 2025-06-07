@@ -133,6 +133,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 
 	tests := []struct {
 		name          string
+		actionID      string
 		outputID      string
 		size          int64
 		setupMock     func(*mock.MockUploadClient) (io.ReadSeekCloser, error)
@@ -142,6 +143,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 	}{
 		{
 			name:     "success",
+			actionID: "test-action",
 			outputID: "test-output",
 			size:     100,
 			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
@@ -164,7 +166,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 				},
 			},
 			expectHeader: map[string]*v1.IndexEntry{
-				"test-output": {
+				"test-action": {
 					OutputId:   "test-output",
 					Size:       100,
 					Timenano:   time.Now().UnixNano(),
@@ -174,6 +176,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 		},
 		{
 			name:     "success with large size",
+			actionID: "test-action",
 			outputID: "test-output",
 			size:     200 * (2 ^ 10),
 			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
@@ -203,7 +206,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 				},
 			},
 			expectHeader: map[string]*v1.IndexEntry{
-				"test-output": {
+				"test-action": {
 					OutputId:   "test-output",
 					Size:       200 * (2 ^ 10),
 					Timenano:   time.Now().UnixNano(),
@@ -213,6 +216,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 		},
 		{
 			name:     "success with empty size",
+			actionID: "test-action",
 			outputID: "test-output",
 			size:     0,
 			setupMock: func(*mock.MockUploadClient) (io.ReadSeekCloser, error) {
@@ -227,7 +231,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 				},
 			},
 			expectHeader: map[string]*v1.IndexEntry{
-				"test-output": {
+				"test-action": {
 					OutputId:   "test-output",
 					Size:       0,
 					Timenano:   time.Now().UnixNano(),
@@ -237,6 +241,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 		},
 		{
 			name:     "upload error",
+			actionID: "test-action",
 			outputID: "test-output",
 			size:     100,
 			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
@@ -274,7 +279,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to setup mock: %v", err)
 			}
-			err = uploader.UploadOutput(t.Context(), tt.outputID, tt.size, reader)
+			err = uploader.UploadOutput(t.Context(), tt.actionID, tt.outputID, tt.size, reader)
 
 			if tt.expectError {
 				if err == nil {
@@ -303,12 +308,14 @@ func TestUploader_UploadOutput(t *testing.T) {
 func TestUploader_Commit(t *testing.T) {
 	t.Parallel()
 
-	baseOutputs := []*v1.ActionsOutput{
-		{
-			Id:     "base",
-			Offset: 0,
-			Size:   50,
-		},
+	baseOutputsClone := func() []*v1.ActionsOutput {
+		return []*v1.ActionsOutput{
+			{
+				Id:     "base",
+				Offset: 0,
+				Size:   50,
+			},
+		}
 	}
 
 	tests := []struct {
@@ -427,7 +434,7 @@ func TestUploader_Commit(t *testing.T) {
 			t.Parallel()
 
 			client := mock.NewMockUploadClient(gomock.NewController(t))
-			uploader := tt.setupUploader(client, baseOutputs, tt.entries)
+			uploader := tt.setupUploader(client, baseOutputsClone(), tt.entries)
 			if uploader == nil {
 				t.Fatal("uploader is nil")
 			}
