@@ -5,20 +5,32 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	myhttp "github.com/mazrean/gocica/internal/pkg/http"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
 )
 
 var _ UploadClient = (*AzureUploadClient)(nil)
 var latencyGauge = metrics.NewGauge("azure_blob_storage_latency")
+var azureConfig = &blockblob.ClientOptions{
+	ClientOptions: azcore.ClientOptions{
+		Transport: myhttp.NewClient(),
+	},
+}
 
 type AzureUploadClient struct {
 	client *blockblob.Client
 }
 
-func NewAzureUploadClient(client *blockblob.Client) *AzureUploadClient {
-	return &AzureUploadClient{client: client}
+func NewAzureUploadClient(uploadURL string) (*AzureUploadClient, error) {
+	client, err := blockblob.NewClientWithNoCredential(uploadURL, azureConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create upload client: %w", err)
+	}
+
+	return &AzureUploadClient{client: client}, nil
 }
 
 func (a *AzureUploadClient) UploadBlock(ctx context.Context, blockID string, r io.ReadSeekCloser) (int64, error) {
@@ -73,8 +85,13 @@ type AzureDownloadClient struct {
 	client *blockblob.Client
 }
 
-func NewAzureDownloadClient(client *blockblob.Client) *AzureDownloadClient {
-	return &AzureDownloadClient{client: client}
+func NewAzureDownloadClient(downloadURL string) (*AzureDownloadClient, error) {
+	client, err := blockblob.NewClientWithNoCredential(downloadURL, azureConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create download client: %w", err)
+	}
+
+	return &AzureDownloadClient{client: client}, nil
 }
 
 func (a *AzureDownloadClient) GetURL(context.Context) string {
