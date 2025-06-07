@@ -15,7 +15,6 @@ import (
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -115,10 +114,6 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 
 const maxChunkSize = 4 * (1 << 20)
 
-// openFileLimit is the maximum number of files that can be opened at the same time.
-// ref: https://github.com/golang/go/issues/46279
-const openFileLimit = 100000
-
 func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend local.Backend) error {
 	outputs := d.header.Outputs
 	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
@@ -127,7 +122,6 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend l
 
 	eg := errgroup.Group{}
 
-	s := semaphore.NewWeighted(openFileLimit)
 	offset := d.headerSize
 	for i := 0; i < len(outputs); {
 		d.logger.Debugf("creating chunk: %d", i)
@@ -139,13 +133,6 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend l
 			output := outputs[i]
 			offset += output.Size
 			chunkSize += output.Size
-
-			d.logger.Debugf("acquiring semaphore(%d): outputID=%s", i, output.Id)
-
-			err := s.Acquire(ctx, 1)
-			if err != nil {
-				return fmt.Errorf("acquire semaphore: %w", err)
-			}
 
 			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.Id)
 
@@ -175,7 +162,6 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend l
 		slices.Reverse(chunkCloseFuncs)
 		j := i
 		eg.Go(func() error {
-			defer s.Release(int64(len(chunkWriters)))
 			defer func() {
 				// io.WriteCloser is expected to be already Closed in JoindWriter.
 				// However, in order to avoid deadlock in the event that an error occurs during the process and Close is not performed, Close is performed by defer without fail.
