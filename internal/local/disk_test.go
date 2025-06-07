@@ -2,6 +2,8 @@ package local
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -139,6 +141,10 @@ func TestDisk_Get(t *testing.T) {
 
 			if tt.isExist {
 				func() {
+					if err := disk.Lock(ctx, outputID); err != nil {
+						t.Fatal(err)
+					}
+
 					_, w, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
 					if err != nil {
 						t.Fatal(err)
@@ -222,9 +228,17 @@ func TestDisk_Put(t *testing.T) {
 
 			var gotPath string
 			func() {
+				if err := disk.Lock(context.Background(), outputID); err != nil {
+					t.Fatal(err)
+				}
+
 				var w io.WriteCloser
 				gotPath, w, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
 				if err != nil {
+					if unlockErr := disk.Unlock(context.Background(), outputID); unlockErr != nil {
+						err = errors.Join(err, fmt.Errorf("unlock local cache: %w", unlockErr))
+					}
+
 					t.Fatal(err)
 				}
 				defer w.Close()

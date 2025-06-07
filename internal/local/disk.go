@@ -40,6 +40,47 @@ func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
 	return disk, nil
 }
 
+func (d *Disk) Lock(_ context.Context, outputIDs ...string) error {
+	d.logger.Debugf("lock waiting")
+	d.objectMapLocker.Lock()
+	defer d.objectMapLocker.Unlock()
+	d.logger.Debugf("lock acquired")
+
+	for _, outputID := range outputIDs {
+		var l *objectLocker
+		var ok bool
+		l, ok = d.objectMap[outputID]
+		if !ok {
+			l = &objectLocker{}
+			d.objectMap[outputID] = l
+		}
+		d.logger.Debugf("lock waiting outputID=%s", outputID)
+		l.l.Lock()
+		d.logger.Debugf("lock acquired outputID=%s", outputID)
+	}
+
+	return nil
+}
+
+func (d *Disk) Unlock(_ context.Context, outputIDs ...string) (err error) {
+	d.logger.Debugf("unlock waiting")
+	d.objectMapLocker.Lock()
+	defer d.objectMapLocker.Unlock()
+	d.logger.Debugf("unlock acquired")
+
+	for _, outputID := range outputIDs {
+		l, ok := d.objectMap[outputID]
+		if !ok {
+			err = errors.Join(err, fmt.Errorf("object not found: outputID=%s", outputID))
+			continue
+		}
+		l.l.Unlock()
+		d.logger.Debugf("unlock released outputID=%s", outputID)
+	}
+
+	return nil
+}
+
 type objectLocker struct {
 	l  sync.RWMutex
 	ok bool
@@ -69,32 +110,30 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 	return d.objectFilePath(outputID), nil
 }
 
-var ErrSizeMismatch = errors.New("size mismatch")
-
+// Put is used to write an output block to the disk.
+// Note: Lock must be acquired **before calling** this method.
 func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.WriteCloser, error) {
 	outputFilePath := d.objectFilePath(outputID)
 
-	var f *os.File
 	f, err := os.Create(outputFilePath)
 	if err != nil {
 		return "", nil, fmt.Errorf("create output file: %w", err)
 	}
-
 	d.logger.Debugf("output file created: path=%s", outputFilePath)
-	var l *objectLocker
+
+	var (
+		l  *objectLocker
+		ok bool
+	)
 	func() {
-		d.objectMapLocker.Lock()
-		defer d.objectMapLocker.Unlock()
-		var ok bool
+		d.objectMapLocker.RLock()
+		defer d.objectMapLocker.RUnlock()
 		l, ok = d.objectMap[outputID]
-		if !ok {
-			l = &objectLocker{}
-			d.objectMap[outputID] = l
-		}
 	}()
-	d.logger.Debugf("write lock waiting outputID=%s", outputID)
-	l.l.Lock()
-	d.logger.Debugf("write lock acquired outputID=%s", outputID)
+	if !ok {
+		return "", nil, fmt.Errorf("object not found: outputID=%s", outputID)
+	}
+
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
 		unlock: sync.OnceFunc(func() {

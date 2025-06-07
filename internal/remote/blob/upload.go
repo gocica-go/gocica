@@ -1,5 +1,7 @@
 package blob
 
+//go:generate go tool mockgen -source=$GOFILE -destination=mock/${GOFILE} -package=mock
+
 import (
 	"bytes"
 	"context"
@@ -58,6 +60,18 @@ func NewUploader(
 	client UploadClient,
 	baseBlobProvider BaseBlobProvider,
 ) (*Uploader, error) {
+	if baseBlobProvider == nil {
+		return &Uploader{
+			logger:       logger,
+			client:       client,
+			nowTimestamp: timestamppb.Now(),
+			header:       make(map[string]*v1.IndexEntry),
+			waitBaseFunc: func() ([]string, int64, []*v1.ActionsOutput, error) {
+				return nil, 0, nil, nil
+			},
+		}, nil
+	}
+
 	entries, err := baseBlobProvider.GetEntries(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get entries: %w", err)
@@ -94,12 +108,6 @@ func (u *Uploader) generateBlockID() (string, error) {
 const maxUploadChunkSize = 4 * (1 << 20)
 
 func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvider) waitBaseFunc {
-	if baseBlobProvider == nil {
-		return func() ([]string, int64, []*v1.ActionsOutput, error) {
-			return nil, 0, nil, nil
-		}
-	}
-
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var (
@@ -203,6 +211,15 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 		Size:        uploadSize,
 		Compression: compression,
 	})
+
+	u.headerLocker.Lock()
+	defer u.headerLocker.Unlock()
+	u.header[outputID] = &v1.IndexEntry{
+		OutputId:   outputID,
+		Size:       uploadSize,
+		Timenano:   time.Now().UnixNano(),
+		LastUsedAt: u.nowTimestamp,
+	}
 
 	return nil
 }
