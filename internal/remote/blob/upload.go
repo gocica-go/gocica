@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
@@ -17,16 +18,24 @@ import (
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var compressGauge = metrics.NewGauge("blob_compress_latency")
 
 type Uploader struct {
-	logger        log.Logger
-	client        UploadClient
+	logger log.Logger
+
+	client UploadClient
+
 	outputsLocker sync.RWMutex
 	outputs       []*v1.ActionsOutput
-	waitBaseFunc  waitBaseFunc
+
+	nowTimestamp *timestamppb.Timestamp
+	headerLocker sync.RWMutex
+	header       map[string]*v1.IndexEntry
+
+	waitBaseFunc waitBaseFunc
 }
 
 type UploadClient interface {
@@ -36,21 +45,42 @@ type UploadClient interface {
 }
 
 type BaseBlobProvider interface {
+	GetEntries(ctx context.Context) (entries map[string]*v1.IndexEntry, err error)
 	GetOutputs(ctx context.Context) (outputs []*v1.ActionsOutput, err error)
 	GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error)
 }
 
 type waitBaseFunc func() (baseBlockIDs []string, baseOutputSize int64, baseOutputs []*v1.ActionsOutput, err error)
 
-func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
+func NewUploader(
+	ctx context.Context,
+	logger log.Logger,
+	client UploadClient,
+	baseBlobProvider BaseBlobProvider,
+) (*Uploader, error) {
+	entries, err := baseBlobProvider.GetEntries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get entries: %w", err)
+	}
+
+	newEntries := make(map[string]*v1.IndexEntry, len(entries))
+	metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
+	for actionID, entry := range entries {
+		if entry.LastUsedAt.AsTime().After(metaLimitLastUsedAt) {
+			newEntries[actionID] = entry
+		}
+	}
+
 	uploader := &Uploader{
-		logger: logger,
-		client: client,
+		logger:       logger,
+		client:       client,
+		nowTimestamp: timestamppb.Now(),
+		header:       newEntries,
 	}
 
 	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
 
-	return uploader
+	return uploader, nil
 }
 
 func (u *Uploader) generateBlockID() (string, error) {
@@ -177,6 +207,16 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	return nil
 }
 
+func (u *Uploader) UpdateEntry(_ context.Context, actionID string, entry *v1.IndexEntry) error {
+	entry.LastUsedAt = u.nowTimestamp
+
+	u.headerLocker.Lock()
+	defer u.headerLocker.Unlock()
+	u.header[actionID] = entry
+
+	return nil
+}
+
 func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs []*v1.ActionsOutput) ([]string, []*v1.ActionsOutput, int64) {
 	var newOutputs []*v1.ActionsOutput
 	func() {
@@ -228,7 +268,7 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1
 	return buf, nil
 }
 
-func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) (int64, error) {
+func (u *Uploader) Commit(ctx context.Context) (int64, error) {
 	baseBlockIDs, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
 	if err != nil {
 		u.logger.Warnf("failed to upload base: %v", err)
@@ -239,7 +279,7 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 
 	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
 
-	headerBuf, err := u.createHeader(entries, outputs, outputSize)
+	headerBuf, err := u.createHeader(u.header, outputs, outputSize)
 	if err != nil {
 		return 0, fmt.Errorf("create header: %w", err)
 	}
