@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/DataDog/zstd"
+	"github.com/mazrean/gocica/internal/local"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
@@ -17,8 +18,10 @@ import (
 )
 
 type Downloader struct {
-	logger     log.Logger
-	client     DownloadClient
+	logger log.Logger
+
+	client DownloadClient
+
 	headerSize int64
 	header     *v1.ActionsCache
 }
@@ -29,7 +32,12 @@ type DownloadClient interface {
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
 
-func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
+func NewDownloader(
+	ctx context.Context,
+	logger log.Logger,
+	client DownloadClient,
+	localBackend local.Backend,
+) (*Downloader, error) {
 	downloader := &Downloader{
 		logger: logger,
 		client: client,
@@ -40,6 +48,13 @@ func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
+
+	// Download all output blocks in the background.
+	go func() {
+		if err := downloader.DownloadAllOutputBlocks(context.Background(), localBackend); err != nil {
+			logger.Errorf("download all output blocks: %v", err)
+		}
+	}()
 
 	return downloader, nil
 }
@@ -67,8 +82,12 @@ func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, h
 	return header, 8 + int64(len(protoBuf)), nil
 }
 
-func (d *Downloader) GetEntries(context.Context) (metadata map[string]*v1.IndexEntry, err error) {
+func (d *Downloader) GetEntries(context.Context) (entries map[string]*v1.IndexEntry, err error) {
 	return d.header.Entries, nil
+}
+
+func (d *Downloader) GetEntry(_ context.Context, actionID string) (metadata *v1.IndexEntry, err error) {
+	return d.header.Entries[actionID], nil
 }
 
 func (d *Downloader) GetOutputs(context.Context) (outputs []*v1.ActionsOutput, err error) {
@@ -89,7 +108,7 @@ const maxChunkSize = 4 * (1 << 20)
 // ref: https://github.com/golang/go/issues/46279
 const openFileLimit = 100000
 
-func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
+func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend local.Backend) error {
 	outputs := d.header.Outputs
 	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
 		return int(x.Offset - y.Offset)
@@ -119,7 +138,7 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.Id)
 
-			w, err := objectWriterFunc(ctx, outputs[i].Id)
+			_, w, err := localBackend.Put(ctx, outputs[i].Id, outputs[i].Size)
 			if err != nil {
 				return fmt.Errorf("get object writer: %w", err)
 			}
