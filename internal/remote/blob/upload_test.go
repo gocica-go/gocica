@@ -2,11 +2,9 @@ package blob
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"io"
-	"slices"
 	"testing"
 	"time"
 
@@ -15,195 +13,20 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/internal/remote/blob/mock"
 	"github.com/mazrean/gocica/log"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-type mockCall struct {
-	method string
-	args   []any
-	result []any
-}
-
-type mockUploadClient struct {
-	calls []mockCall
-}
-
-func (m *mockUploadClient) UploadBlock(_ context.Context, blobID string, _ io.ReadSeekCloser) (int64, error) {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "UploadBlock" {
-			if call.args[0] == nil {
-				size, ok := call.result[0].(int64)
-				if !ok {
-					return 0, errors.New("invalid size type")
-				}
-				var err error
-				if e, ok := call.result[1].(error); ok {
-					err = e
-				}
-				return size, err
-			}
-			if str, ok := call.args[0].(string); ok && str == blobID {
-				size, ok := call.result[0].(int64)
-				if !ok {
-					return 0, errors.New("invalid size type")
-				}
-				var err error
-				if e, ok := call.result[1].(error); ok {
-					err = e
-				}
-				return size, err
-			}
-		}
-	}
-	return 0, errors.New("unexpected UploadBlock call")
-}
-
-func (m *mockUploadClient) UploadBlockFromURL(_ context.Context, _, url string, offset, size int64) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "UploadBlockFromURL" {
-			if len(call.args) < 4 {
-				continue
-			}
-			if _, ok := call.args[0].(string); !ok {
-				continue
-			}
-			if u, ok := call.args[1].(string); !ok || u != url {
-				continue
-			}
-			if off, ok := call.args[2].(int64); !ok || off != offset {
-				continue
-			}
-			if sz, ok := call.args[3].(int64); !ok || sz != size {
-				continue
-			}
-			if call.result[0] == nil {
-				return nil
-			}
-			if err, ok := call.result[0].(error); ok {
-				return err
-			}
-		}
-	}
-	return errors.New("unexpected UploadBlockFromURL call for URL: " + url)
-}
-
-func (m *mockUploadClient) Commit(_ context.Context, _ []string) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "Commit" {
-			if call.result[0] == nil {
-				return nil
-			}
-			if err, ok := call.result[0].(error); ok {
-				return err
-			}
-		}
-	}
-	return errors.New("unexpected Commit call")
-}
-
-func (m *mockUploadClient) expectUploadBlock(blobID string, size int64, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "UploadBlock",
-		args:   []any{blobID},
-		result: []any{size, err},
-	})
-}
-
-func (m *mockUploadClient) expectAnyUploadBlock(size int64, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "UploadBlock",
-		args:   []any{nil},
-		result: []any{size, err},
-	})
-}
-
-func (m *mockUploadClient) expectUploadBlockFromURL(offset, size int64, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "UploadBlockFromURL",
-		args:   []any{"", "test-url", offset, size},
-		result: []any{err},
-	})
-}
-
-func (m *mockUploadClient) expectCommit(err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "Commit",
-		args:   []any{nil},
-		result: []any{err},
-	})
-}
-
-type mockBaseBlobProvider struct {
-	calls []mockCall
-}
-
-func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) ([]*v1.ActionsOutput, error) {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "DownloadOutputs" {
-			outputs := []*v1.ActionsOutput{}
-			if call.result[0] != nil {
-				if out, ok := call.result[0].([]*v1.ActionsOutput); ok {
-					outputs = out
-				}
-			}
-			if call.result[1] == nil {
-				return outputs, nil
-			}
-			if err, ok := call.result[1].(error); ok {
-				return outputs, err
-			}
-		}
-	}
-	return nil, errors.New("unexpected DownloadOutputs call")
-}
-
-func (m *mockBaseBlobProvider) GetOutputBlockURL(_ context.Context) (string, int64, int64, error) {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "GetOutputBlockURL" {
-			if call.result[3] == nil {
-				url, ok1 := call.result[0].(string)
-				offset, ok2 := call.result[1].(int64)
-				size, ok3 := call.result[2].(int64)
-				if ok1 && ok2 && ok3 {
-					return url, offset, size, nil
-				}
-			}
-			if err, ok := call.result[3].(error); ok {
-				return "", 0, 0, err
-			}
-		}
-	}
-	return "", 0, 0, errors.New("unexpected GetOutputBlockURL call")
-}
-
-func (m *mockBaseBlobProvider) expectGetOutputBlockURL(url string, offset, size int64, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "GetOutputBlockURL",
-		result: []any{url, offset, size, err},
-	})
-}
-
-func (m *mockBaseBlobProvider) expectDownloadOutputs(outputs []*v1.ActionsOutput, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "DownloadOutputs",
-		result: []any{outputs, err},
-	})
-}
 
 func TestNewUploader(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name             string
-		mockSetup        func(*mockUploadClient, *mockBaseBlobProvider)
+		mockSetup        func(*mock.MockUploadClient, *mock.MockBaseBlobProvider)
 		expectError      bool
 		checkBaseFunc    bool
 		wantBlockIDEmpty bool
@@ -211,18 +34,19 @@ func TestNewUploader(t *testing.T) {
 	}{
 		{
 			name:             "success without base provider",
-			mockSetup:        func(*mockUploadClient, *mockBaseBlobProvider) {},
+			mockSetup:        func(*mock.MockUploadClient, *mock.MockBaseBlobProvider) {},
 			wantBlockIDEmpty: true,
 			wantSize:         0,
 		},
 		{
 			name: "success with base provider",
-			mockSetup: func(client *mockUploadClient, provider *mockBaseBlobProvider) {
+			mockSetup: func(client *mock.MockUploadClient, provider *mock.MockBaseBlobProvider) {
 				offset := int64(100)
 				size := int64(200)
-				provider.expectGetOutputBlockURL("test-url", offset, size, nil)
-				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
-				client.expectUploadBlockFromURL(offset, size, nil)
+				provider.EXPECT().GetEntries(gomock.Any()).Return(map[string]*v1.IndexEntry{}, nil)
+				provider.EXPECT().GetOutputBlockURL(gomock.Any()).Return("test-url", offset, size, nil)
+				provider.EXPECT().GetOutputs(gomock.Any()).Return([]*v1.ActionsOutput{}, nil)
+				client.EXPECT().UploadBlockFromURL(gomock.Any(), gomock.Any(), "test-url", offset, size).Return(nil)
 			},
 			checkBaseFunc:    true,
 			wantBlockIDEmpty: false,
@@ -230,19 +54,10 @@ func TestNewUploader(t *testing.T) {
 		},
 		{
 			name: "GetOutputBlockURL error",
-			mockSetup: func(_ *mockUploadClient, provider *mockBaseBlobProvider) {
-				provider.expectGetOutputBlockURL("", 0, 0, errors.New("get url error"))
-				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
-			},
-			checkBaseFunc: true,
-			expectError:   true,
-			wantSize:      0,
-		},
-		{
-			name: "DownloadOutputs error",
-			mockSetup: func(_ *mockUploadClient, provider *mockBaseBlobProvider) {
-				provider.expectGetOutputBlockURL("test-url", 100, 200, nil)
-				provider.expectDownloadOutputs(nil, errors.New("download error"))
+			mockSetup: func(_ *mock.MockUploadClient, provider *mock.MockBaseBlobProvider) {
+				provider.EXPECT().GetEntries(gomock.Any()).Return(map[string]*v1.IndexEntry{}, nil)
+				provider.EXPECT().GetOutputBlockURL(gomock.Any()).Return("", int64(0), int64(0), errors.New("get url error"))
+				provider.EXPECT().GetOutputs(gomock.Any()).Return([]*v1.ActionsOutput{}, nil)
 			},
 			checkBaseFunc: true,
 			expectError:   true,
@@ -250,12 +65,13 @@ func TestNewUploader(t *testing.T) {
 		},
 		{
 			name: "UploadBlockFromURL error",
-			mockSetup: func(client *mockUploadClient, provider *mockBaseBlobProvider) {
+			mockSetup: func(client *mock.MockUploadClient, provider *mock.MockBaseBlobProvider) {
 				offset := int64(100)
 				size := int64(200)
-				provider.expectGetOutputBlockURL("test-url", offset, size, nil)
-				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
-				client.expectUploadBlockFromURL(offset, size, errors.New("upload error"))
+				provider.EXPECT().GetEntries(gomock.Any()).Return(map[string]*v1.IndexEntry{}, nil)
+				provider.EXPECT().GetOutputBlockURL(gomock.Any()).Return("test-url", offset, size, nil)
+				provider.EXPECT().GetOutputs(gomock.Any()).Return([]*v1.ActionsOutput{}, nil)
+				client.EXPECT().UploadBlockFromURL(gomock.Any(), gomock.Any(), "test-url", offset, size).Return(errors.New("upload error"))
 			},
 			checkBaseFunc: true,
 			expectError:   true,
@@ -266,8 +82,8 @@ func TestNewUploader(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &mockUploadClient{}
-			provider := &mockBaseBlobProvider{}
+			client := mock.NewMockUploadClient(gomock.NewController(t))
+			provider := mock.NewMockBaseBlobProvider(gomock.NewController(t))
 			tt.mockSetup(client, provider)
 
 			var baseProvider BaseBlobProvider
@@ -275,7 +91,10 @@ func TestNewUploader(t *testing.T) {
 				baseProvider = provider
 			}
 
-			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider)
+			uploader, err := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider)
+			if err != nil {
+				t.Fatalf("failed to create uploader: %v", err)
+			}
 			if uploader == nil {
 				t.Fatal("uploader is nil")
 			}
@@ -313,54 +132,128 @@ func TestUploader_UploadOutput(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		outputID    string
-		size        int64
-		setupMock   func(*mockUploadClient) (io.ReadSeekCloser, error)
-		expectError bool
+		name          string
+		outputID      string
+		size          int64
+		setupMock     func(*mock.MockUploadClient) (io.ReadSeekCloser, error)
+		expectOutputs []*v1.ActionsOutput
+		expectHeader  map[string]*v1.IndexEntry
+		expectError   bool
 	}{
 		{
 			name:     "success",
 			outputID: "test-output",
 			size:     100,
-			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
+			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
 				data := make([]byte, 100)
-				compressedData, err := zstd.Compress(nil, data)
-				if err != nil {
-					return nil, err
-				}
-				client.expectUploadBlock("test-output", int64(len(compressedData)), nil)
+				client.EXPECT().UploadBlock(gomock.Any(), "test-output", gomock.Cond(func(r io.ReadSeekCloser) bool {
+					buf := bytes.NewBuffer(nil)
+					_, err := io.Copy(buf, r)
+					if err != nil {
+						t.Fatalf("failed to copy: %v", err)
+					}
+
+					return bytes.Equal(buf.Bytes(), data)
+				})).Return(int64(len(data)), nil)
 				return myio.NopSeekCloser(bytes.NewReader(data)), nil
+			},
+			expectOutputs: []*v1.ActionsOutput{
+				{
+					Id:   "test-output",
+					Size: 100,
+				},
+			},
+			expectHeader: map[string]*v1.IndexEntry{
+				"test-output": {
+					OutputId:   "test-output",
+					Size:       100,
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.Now(),
+				},
 			},
 		},
 		{
-			name:     "size mismatch",
+			name:     "success with large size",
 			outputID: "test-output",
-			size:     100,
-			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
-				data := make([]byte, 50)
-				compressedData, err := zstd.Compress(nil, data)
-				if err != nil {
-					return nil, err
-				}
-				client.expectUploadBlock("test-output", int64(len(compressedData)), nil)
+			size:     200 * (2 ^ 10),
+			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
+				data := make([]byte, 200*(2^10))
+				client.EXPECT().UploadBlock(gomock.Any(), "test-output", gomock.Cond(func(r io.ReadSeekCloser) bool {
+					buf := bytes.NewBuffer(nil)
+					zw := zstd.NewDecompressWriter(buf)
+
+					_, err := io.Copy(zw, r)
+					if err != nil {
+						t.Fatalf("failed to copy: %v", err)
+					}
+
+					if err := zw.Close(); err != nil {
+						t.Fatalf("failed to close: %v", err)
+					}
+
+					return bytes.Equal(buf.Bytes(), data)
+				})).Return(int64(len(data)), nil)
 				return myio.NopSeekCloser(bytes.NewReader(data)), nil
+			},
+			expectOutputs: []*v1.ActionsOutput{
+				{
+					Id:          "test-output",
+					Size:        200 * (2 ^ 10),
+					Compression: v1.Compression_COMPRESSION_ZSTD,
+				},
+			},
+			expectHeader: map[string]*v1.IndexEntry{
+				"test-output": {
+					OutputId:   "test-output",
+					Size:       200 * (2 ^ 10),
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.Now(),
+				},
+			},
+		},
+		{
+			name:     "success with empty size",
+			outputID: "test-output",
+			size:     0,
+			setupMock: func(*mock.MockUploadClient) (io.ReadSeekCloser, error) {
+				return myio.NopSeekCloser(bytes.NewReader(nil)), nil
+			},
+			expectOutputs: []*v1.ActionsOutput{
+				{
+					Id:          "test-output",
+					Offset:      0,
+					Size:        0,
+					Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
+				},
+			},
+			expectHeader: map[string]*v1.IndexEntry{
+				"test-output": {
+					OutputId:   "test-output",
+					Size:       0,
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.Now(),
+				},
 			},
 		},
 		{
 			name:     "upload error",
 			outputID: "test-output",
 			size:     100,
-			setupMock: func(client *mockUploadClient) (io.ReadSeekCloser, error) {
+			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
 				data := make([]byte, 100)
-				compressedData, err := zstd.Compress(nil, data)
-				if err != nil {
-					return nil, err
-				}
-				client.expectUploadBlock("test-output", int64(len(compressedData)), errors.New("upload error"))
+				client.EXPECT().UploadBlock(gomock.Any(), "test-output", gomock.Cond(func(r io.ReadSeekCloser) bool {
+					buf := bytes.NewBuffer(nil)
+					_, err := io.Copy(buf, r)
+					if err != nil {
+						t.Fatalf("failed to copy: %v", err)
+					}
+
+					return bytes.Equal(buf.Bytes(), data)
+				})).Return(int64(len(data)), errors.New("upload error"))
 				return myio.NopSeekCloser(bytes.NewReader(data)), nil
 			},
-			expectError: true,
+			expectError:  true,
+			expectHeader: map[string]*v1.IndexEntry{},
 		},
 	}
 
@@ -369,8 +262,13 @@ func TestUploader_UploadOutput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &mockUploadClient{}
-			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{})
+			client := mock.NewMockUploadClient(gomock.NewController(t))
+			uploader := &Uploader{
+				logger:       log.DefaultLogger,
+				client:       client,
+				nowTimestamp: timestamppb.Now(),
+				header:       make(map[string]*v1.IndexEntry),
+			}
 
 			reader, err := tt.setupMock(client)
 			if err != nil {
@@ -381,9 +279,22 @@ func TestUploader_UploadOutput(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
+					return
 				}
 			} else if err != nil {
 				t.Errorf("unexpected error: %v", err)
+				return
+			}
+
+			if diff := cmp.Diff(tt.expectOutputs, uploader.outputs, cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
+				t.Errorf("outputs mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tt.expectHeader, uploader.header,
+				cmpopts.IgnoreUnexported(v1.IndexEntry{}),
+				cmpopts.IgnoreTypes(timestamppb.Timestamp{}),
+				cmpopts.IgnoreFields(v1.IndexEntry{}, "Timenano"),
+			); diff != "" {
+				t.Errorf("header mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -402,13 +313,21 @@ func TestUploader_Commit(t *testing.T) {
 
 	tests := []struct {
 		name          string
+		outputs       []*v1.ActionsOutput
 		entries       map[string]*v1.IndexEntry
-		setupUploader func(context.Context, *mockUploadClient, *mockBaseBlobProvider) *Uploader
+		setupUploader func(*mock.MockUploadClient, []*v1.ActionsOutput, map[string]*v1.IndexEntry) *Uploader
 		expectError   bool
 		validateState func(*testing.T, *Uploader)
 	}{
 		{
 			name: "success with no new outputs",
+			outputs: []*v1.ActionsOutput{
+				{
+					Id:     "test",
+					Offset: 0,
+					Size:   100,
+				},
+			},
 			entries: map[string]*v1.IndexEntry{
 				"test": {
 					OutputId:   "test",
@@ -417,56 +336,40 @@ func TestUploader_Commit(t *testing.T) {
 					LastUsedAt: timestamppb.Now(),
 				},
 			},
-			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
-				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
-				client.expectUploadBlockFromURL(0, 100, nil)
-				client.expectAnyUploadBlock(50, nil)
-				client.expectCommit(nil)
-				return NewUploader(ctx, log.DefaultLogger, client, provider)
-			},
-		},
-		{
-			name: "success with new outputs",
-			entries: map[string]*v1.IndexEntry{
-				"test": {
-					OutputId:   "test",
-					Size:       100,
-					Timenano:   time.Now().UnixNano(),
-					LastUsedAt: timestamppb.Now(),
-				},
-			},
-			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
-				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
-				client.expectUploadBlockFromURL(0, 100, nil)
-				client.expectAnyUploadBlock(50, nil)
-				client.expectCommit(nil)
+			setupUploader: func(client *mock.MockUploadClient, outputs []*v1.ActionsOutput, entries map[string]*v1.IndexEntry) *Uploader {
+				client.EXPECT().UploadBlock(gomock.Any(), gomock.Any(), gomock.Cond(func(r io.ReadSeekCloser) bool {
+					buf := bytes.NewBuffer(nil)
+					_, err := io.Copy(buf, r)
+					if err != nil {
+						t.Fatalf("failed to copy: %v", err)
+					}
 
-				uploader := NewUploader(ctx, log.DefaultLogger, client, provider)
-				uploader.outputs = []*v1.ActionsOutput{
-					{
-						Id:          "new-output",
-						Offset:      100,
-						Size:        150,
-						Compression: v1.Compression_COMPRESSION_ZSTD,
+					var header v1.ActionsCache
+					if err := proto.Unmarshal(buf.Bytes()[8:], &header); err != nil {
+						t.Fatalf("failed to unmarshal: %v", err)
+					}
+
+					return cmp.Equal(entries, header.Entries,
+						cmpopts.IgnoreUnexported(v1.IndexEntry{}),
+						cmpopts.IgnoreTypes(timestamppb.Timestamp{}),
+						cmpopts.IgnoreFields(v1.IndexEntry{}, "Timenano"),
+					)
+				})).Return(int64(8), nil)
+				client.EXPECT().Commit(t.Context(), gomock.Cond(func(ids []string) bool {
+					return len(ids) == 2
+				})).Return(nil)
+
+				uploader := &Uploader{
+					logger:  log.DefaultLogger,
+					client:  client,
+					header:  entries,
+					outputs: outputs,
+					waitBaseFunc: func() ([]string, int64, []*v1.ActionsOutput, error) {
+						return nil, 0, nil, nil
 					},
 				}
+
 				return uploader
-			},
-			validateState: func(t *testing.T, u *Uploader) {
-				u.outputsLocker.RLock()
-				defer u.outputsLocker.RUnlock()
-				if diff := cmp.Diff([]*v1.ActionsOutput{
-					{
-						Id:          "new-output",
-						Offset:      100,
-						Size:        150,
-						Compression: v1.Compression_COMPRESSION_ZSTD,
-					},
-				}, u.outputs, cmpopts.IgnoreUnexported(v1.ActionsOutput{})); diff != "" {
-					t.Errorf("outputs mismatch (-want +got):\n%s", diff)
-				}
 			},
 		},
 		{
@@ -479,13 +382,40 @@ func TestUploader_Commit(t *testing.T) {
 					LastUsedAt: timestamppb.Now(),
 				},
 			},
-			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
-				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
-				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
-				client.expectUploadBlockFromURL(0, 100, nil)
-				client.expectAnyUploadBlock(50, nil)
-				client.expectCommit(errors.New("commit error"))
-				return NewUploader(ctx, log.DefaultLogger, client, provider)
+			setupUploader: func(client *mock.MockUploadClient, outputs []*v1.ActionsOutput, entries map[string]*v1.IndexEntry) *Uploader {
+				client.EXPECT().UploadBlock(gomock.Any(), gomock.Any(), gomock.Cond(func(r io.ReadSeekCloser) bool {
+					buf := bytes.NewBuffer(nil)
+					_, err := io.Copy(buf, r)
+					if err != nil {
+						t.Fatalf("failed to copy: %v", err)
+					}
+
+					var header v1.ActionsCache
+					if err := proto.Unmarshal(buf.Bytes()[8:], &header); err != nil {
+						t.Fatalf("failed to unmarshal: %v", err)
+					}
+
+					return cmp.Equal(entries, header.Entries,
+						cmpopts.IgnoreUnexported(v1.IndexEntry{}),
+						cmpopts.IgnoreTypes(timestamppb.Timestamp{}),
+						cmpopts.IgnoreFields(v1.IndexEntry{}, "Timenano"),
+					)
+				})).Return(int64(8), nil)
+				client.EXPECT().Commit(gomock.Any(), gomock.Cond(func(ids []string) bool {
+					return len(ids) == 2
+				})).Return(errors.New("commit error"))
+
+				uploader := &Uploader{
+					logger:  log.DefaultLogger,
+					client:  client,
+					header:  entries,
+					outputs: outputs,
+					waitBaseFunc: func() ([]string, int64, []*v1.ActionsOutput, error) {
+						return nil, 0, nil, nil
+					},
+				}
+
+				return uploader
 			},
 			expectError: true,
 		},
@@ -496,11 +426,15 @@ func TestUploader_Commit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &mockUploadClient{}
-			provider := &mockBaseBlobProvider{}
-			uploader := tt.setupUploader(t.Context(), client, provider)
+			client := mock.NewMockUploadClient(gomock.NewController(t))
+			uploader := tt.setupUploader(client, baseOutputs, tt.entries)
+			if uploader == nil {
+				t.Fatal("uploader is nil")
+			}
 
-			_, err := uploader.Commit(t.Context(), tt.entries)
+			uploader.header = tt.entries
+
+			_, err := uploader.Commit(t.Context())
 
 			if tt.expectError {
 				if err == nil {

@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/mazrean/gocica/internal/closer"
 	"github.com/mazrean/gocica/internal/config"
@@ -18,7 +17,6 @@ import (
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
-	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
@@ -295,14 +293,6 @@ func (c *GitHubActionsCache) Put(ctx context.Context, actionID, objectID string,
 
 	if err := c.uploader.UploadOutput(ctx, objectID, size, myio.NopSeekCloser(r)); err != nil {
 		return fmt.Errorf("upload output: %w", err)
-	}
-
-	if err := c.uploader.UpdateEntry(ctx, actionID, &v1.IndexEntry{
-		OutputId: objectID,
-		Size:     size,
-		Timenano: time.Now().UnixNano(),
-	}); err != nil {
-		return fmt.Errorf("update entry: %w", err)
 	}
 
 	return nil

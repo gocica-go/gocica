@@ -5,189 +5,47 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"testing"
 
 	"github.com/DataDog/zstd"
 	"github.com/google/go-cmp/cmp"
+	"github.com/mazrean/gocica/internal/local"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/internal/remote/blob/mock"
 	"github.com/mazrean/gocica/log"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 )
 
-type mockDownloadClient struct {
-	calls []mockCall
-}
-
-func (m *mockDownloadClient) GetURL(context.Context) string {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "GetURL" {
-			if url, ok := call.result[0].(string); ok {
-				return url
-			}
-		}
-	}
-	return ""
-}
-
-func (m *mockDownloadClient) DownloadBlock(_ context.Context, offset int64, size int64, w io.Writer) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "DownloadBlock" {
-			expectedOffset, ok1 := call.args[1].(int64)
-			expectedSize, ok2 := call.args[2].(int64)
-
-			if ok1 && ok2 && expectedOffset == offset && expectedSize == size {
-				if call.result[1] != nil {
-					if err, ok := call.result[1].(error); ok {
-						return err
-					}
-				}
-				if data, ok := call.result[0].([]byte); ok {
-					_, err := w.Write(data)
-					return err
-				}
-				return nil
-			}
-		}
-	}
-	return fmt.Errorf("unexpected DownloadBlock call: offset=%d, size=%d", offset, size)
-}
-
-func (m *mockDownloadClient) DownloadBlockBuffer(_ context.Context, offset int64, size int64, buf []byte) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
-		if call.method == "DownloadBlockBuffer" {
-			expectedOffset, ok1 := call.args[1].(int64)
-			expectedSize, ok2 := call.args[2].(int64)
-
-			if ok1 && ok2 && expectedOffset == offset && expectedSize == size {
-				if call.result[1] != nil {
-					if err, ok := call.result[1].(error); ok {
-						return err
-					}
-				}
-
-				if data, ok := call.result[0].([]byte); ok {
-					copy(buf, data)
-				}
-				return nil
-			}
-		}
-	}
-	return errors.New("unexpected DownloadBlockBuffer call")
-}
-
-func (m *mockDownloadClient) expectGetURL(url string) {
-	m.calls = append(m.calls, mockCall{
-		method: "GetURL",
-		args:   []any{nil}, // Add context placeholder as nil
-		result: []any{url},
-	})
-}
-
-func (m *mockDownloadClient) expectDownloadBlockBuffer(offset, size int64, data []byte, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "DownloadBlockBuffer",
-		args:   []any{nil, offset, size, nil}, // Add context placeholder as nil
-		result: []any{data, err},
-	})
-}
-
-func (m *mockDownloadClient) expectDownloadBlock(offset, size int64, data []byte, err error) {
-	m.calls = append(m.calls, mockCall{
-		method: "DownloadBlock",
-		args:   []any{nil, offset, size, nil},
-		result: []any{data, err},
-	})
-}
-
-func TestNewDownloader(t *testing.T) {
+func TestDownloader_readHeader(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
-		setupMock   func(*mockDownloadClient, *v1.ActionsCache) []byte
+		header      *v1.ActionsCache
+		setupMock   func(*mock.MockDownloadClient, []byte)
 		expectError bool
 	}{
 		{
 			name: "success",
-			setupMock: func(client *mockDownloadClient, header *v1.ActionsCache) []byte {
-				headerBytes, err := proto.Marshal(header)
-				if err != nil {
-					t.Fatal(err)
-				}
-
+			setupMock: func(client *mock.MockDownloadClient, headerBytes []byte) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-				client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
-
-				return append(sizeBuf, headerBytes...)
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(0), int64(8), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, buf []byte) error {
+						copy(buf, sizeBuf)
+						return nil
+					})
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(8), int64(len(headerBytes)), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, buf []byte) error {
+						copy(buf, headerBytes)
+						return nil
+					})
 			},
-		},
-		{
-			name: "size download error",
-			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
-				client.expectDownloadBlockBuffer(0, 8, nil, errors.New("download error"))
-				return nil
-			},
-			expectError: true,
-		},
-		{
-			name: "header download error",
-			setupMock: func(client *mockDownloadClient, header *v1.ActionsCache) []byte {
-				headerBytes, err := proto.Marshal(header)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				sizeBuf := make([]byte, 8)
-				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
-
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-				client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), nil, errors.New("download error"))
-
-				return nil
-			},
-			expectError: true,
-		},
-		{
-			name: "zero size header",
-			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
-				sizeBuf := make([]byte, 8)
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-				return sizeBuf
-			},
-			expectError: true,
-		},
-		{
-			name: "invalid protobuf",
-			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
-				invalidProto := []byte("invalid protobuf")
-				sizeBuf := make([]byte, 8)
-				binary.BigEndian.PutUint64(sizeBuf, uint64(len(invalidProto)))
-
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-				client.expectDownloadBlockBuffer(8, int64(len(invalidProto)), invalidProto, nil)
-
-				return append(sizeBuf, invalidProto...)
-			},
-			expectError: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			client := &mockDownloadClient{}
-			header := &v1.ActionsCache{
+			header: &v1.ActionsCache{
 				Entries: map[string]*v1.IndexEntry{
 					"test": {
 						OutputId: "test",
@@ -201,11 +59,99 @@ func TestNewDownloader(t *testing.T) {
 						Size:   100,
 					},
 				},
+			},
+		},
+		{
+			name: "size download error",
+			setupMock: func(client *mock.MockDownloadClient, _ []byte) {
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(0), int64(8), gomock.Any()).
+					Return(errors.New("download error"))
+			},
+			expectError: true,
+		},
+		{
+			name: "header download error",
+			setupMock: func(client *mock.MockDownloadClient, headerBytes []byte) {
+				sizeBuf := make([]byte, 8)
+				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
+
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(0), int64(8), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, buf []byte) error {
+						copy(buf, sizeBuf)
+						return nil
+					})
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(8), int64(len(headerBytes)), gomock.Any()).
+					Return(errors.New("download error"))
+			},
+			header: &v1.ActionsCache{
+				Entries: map[string]*v1.IndexEntry{
+					"test": {
+						OutputId: "test",
+						Size:     100,
+					},
+				},
+			},
+			expectError: true,
+		},
+		{
+			name: "zero size header",
+			setupMock: func(client *mock.MockDownloadClient, _ []byte) {
+				sizeBuf := make([]byte, 8)
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(0), int64(8), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, buf []byte) error {
+						copy(buf, sizeBuf)
+						return nil
+					})
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(8), int64(0), gomock.Any()).Return(nil)
+			},
+			header: &v1.ActionsCache{
+				Entries: map[string]*v1.IndexEntry{},
+				Outputs: []*v1.ActionsOutput{},
+			},
+		},
+		{
+			name: "invalid protobuf",
+			setupMock: func(client *mock.MockDownloadClient, _ []byte) {
+				invalidProto := []byte("invalid protobuf")
+				sizeBuf := make([]byte, 8)
+				binary.BigEndian.PutUint64(sizeBuf, uint64(len(invalidProto)))
+
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(0), int64(8), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, buf []byte) error {
+						copy(buf, sizeBuf)
+						return nil
+					})
+				client.EXPECT().DownloadBlockBuffer(gomock.Any(), int64(8), int64(len(invalidProto)), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, buf []byte) error {
+						copy(buf, invalidProto)
+						return nil
+					})
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			headerBytes, err := proto.Marshal(tt.header)
+			if err != nil {
+				t.Fatal(err)
 			}
 
-			_ = tt.setupMock(client, header)
+			client := mock.NewMockDownloadClient(gomock.NewController(t))
 
-			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
+			tt.setupMock(client, headerBytes)
+
+			downloader := &Downloader{
+				logger: log.DefaultLogger,
+				client: client,
+			}
+
+			header, headerSize, err := downloader.readHeader(t.Context())
+
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -216,8 +162,11 @@ func TestNewDownloader(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if downloader == nil {
-				t.Fatal("downloader is nil")
+			if diff := cmp.Diff(tt.header, header, protocmp.Transform()); diff != "" {
+				t.Errorf("header mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(int64(8+len(headerBytes)), headerSize); diff != "" {
+				t.Errorf("header size mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -292,21 +241,10 @@ func TestDownloader_GetEntries(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &mockDownloadClient{}
-			headerBytes, err := proto.Marshal(tt.header)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			sizeBuf := make([]byte, 8)
-			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
-
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
-
-			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
-			if err != nil {
-				t.Fatal(err)
+			downloader := &Downloader{
+				logger: log.DefaultLogger,
+				client: mock.NewMockDownloadClient(gomock.NewController(t)),
+				header: tt.header,
 			}
 
 			entries, err := downloader.GetEntries(t.Context())
@@ -321,13 +259,80 @@ func TestDownloader_GetEntries(t *testing.T) {
 	}
 }
 
+func TestDownloader_GetEntry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		header      *v1.ActionsCache
+		expectEntry *v1.IndexEntry
+	}{
+		{
+			name: "success with single entry",
+			header: &v1.ActionsCache{
+				Entries: map[string]*v1.IndexEntry{
+					"test": {
+						OutputId: "test",
+						Size:     100,
+					},
+				},
+			},
+			expectEntry: &v1.IndexEntry{
+				OutputId: "test",
+				Size:     100,
+			},
+		},
+		{
+			name: "success with multiple entries",
+			header: &v1.ActionsCache{
+				Entries: map[string]*v1.IndexEntry{
+					"test": {
+						OutputId: "test1",
+						Size:     100,
+					},
+					"test2": {
+						OutputId: "test2",
+						Size:     200,
+					},
+				},
+			},
+			expectEntry: &v1.IndexEntry{
+				OutputId: "test1",
+				Size:     100,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			downloader := &Downloader{
+				logger: log.DefaultLogger,
+				client: mock.NewMockDownloadClient(gomock.NewController(t)),
+				header: tt.header,
+			}
+
+			entry, err := downloader.GetEntry(t.Context(), "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if diff := cmp.Diff(tt.expectEntry, entry, protocmp.Transform()); diff != "" {
+				t.Errorf("entry mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestDownloader_GetOutputBlockURL(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name        string
 		header      *v1.ActionsCache
-		setupMock   func(*mockDownloadClient)
+		setupMock   func(*mock.MockDownloadClient)
 		expectURL   string
 		expectSize  int64
 		expectError bool
@@ -337,8 +342,8 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			header: &v1.ActionsCache{
 				OutputTotalSize: 150,
 			},
-			setupMock: func(client *mockDownloadClient) {
-				client.expectGetURL("test-url")
+			setupMock: func(client *mock.MockDownloadClient) {
+				client.EXPECT().GetURL(gomock.Any()).Return("test-url")
 			},
 			expectURL:  "test-url",
 			expectSize: 150,
@@ -348,8 +353,8 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			header: &v1.ActionsCache{
 				OutputTotalSize: 150,
 			},
-			setupMock: func(client *mockDownloadClient) {
-				client.expectGetURL("")
+			setupMock: func(client *mock.MockDownloadClient) {
+				client.EXPECT().GetURL(gomock.Any()).Return("")
 			},
 			expectURL:  "",
 			expectSize: 150,
@@ -359,8 +364,8 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			header: &v1.ActionsCache{
 				OutputTotalSize: 0,
 			},
-			setupMock: func(client *mockDownloadClient) {
-				client.expectGetURL("test-url")
+			setupMock: func(client *mock.MockDownloadClient) {
+				client.EXPECT().GetURL(gomock.Any()).Return("test-url")
 			},
 			expectURL:  "test-url",
 			expectSize: 0,
@@ -372,25 +377,16 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &mockDownloadClient{}
-			headerBytes, err := proto.Marshal(tt.header)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			sizeBuf := make([]byte, 8)
-			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
-
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+			client := mock.NewMockDownloadClient(gomock.NewController(t))
 
 			if tt.setupMock != nil {
 				tt.setupMock(client)
 			}
 
-			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
-			if err != nil {
-				t.Fatal(err)
+			downloader := &Downloader{
+				logger: log.DefaultLogger,
+				client: client,
+				header: tt.header,
 			}
 
 			url, offset, size, err := downloader.GetOutputBlockURL(t.Context())
@@ -407,7 +403,7 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			if diff := cmp.Diff(tt.expectURL, url); diff != "" {
 				t.Errorf("url mismatch (-want +got):\n%s", diff)
 			}
-			if diff := cmp.Diff(int64(8+len(headerBytes)), offset); diff != "" {
+			if diff := cmp.Diff(int64(0), offset); diff != "" {
 				t.Errorf("offset mismatch (-want +got):\n%s", diff)
 			}
 			if diff := cmp.Diff(tt.expectSize, size); diff != "" {
@@ -418,7 +414,7 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 }
 
 type mockWriteCloser struct {
-	bytes.Buffer
+	*bytes.Buffer
 	closed bool
 }
 
@@ -439,7 +435,7 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 	tests := []struct {
 		name        string
 		header      *v1.ActionsCache
-		setupMock   func(*mockDownloadClient, int64) error
+		setupMock   func(*mock.MockDownloadClient, *local.MockBackend, *map[string]*mockWriteCloser, int64)
 		writerError bool
 		expectData  map[string][]byte
 		expectError bool
@@ -457,10 +453,19 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 				},
 				OutputTotalSize: 10,
 			},
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+			setupMock: func(client *mock.MockDownloadClient, localBackend *local.MockBackend, writers *map[string]*mockWriteCloser, headerSize int64) {
 				data := []byte("testdata12")
-				client.expectDownloadBlock(headerSize, int64(10), data, nil)
-				return nil
+				client.EXPECT().DownloadBlock(gomock.Any(), headerSize, int64(10), gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ int64, _ int64, w io.Writer) error {
+						_, _ = w.Write(data)
+						return nil
+					})
+				localBackend.EXPECT().Put(gomock.Any(), "test", int64(10)).DoAndReturn(func(context.Context, string, int64) (string, io.WriteCloser, error) {
+					(*writers)["test"] = &mockWriteCloser{
+						Buffer: bytes.NewBuffer(nil),
+					}
+					return "test", (*writers)["test"], nil
+				})
 			},
 			expectData: map[string][]byte{
 				"test": []byte("testdata12"),
@@ -485,10 +490,25 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 				},
 				OutputTotalSize: 20,
 			},
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+			setupMock: func(client *mock.MockDownloadClient, localBackend *local.MockBackend, writers *map[string]*mockWriteCloser, headerSize int64) {
 				data := []byte("testdata12testdata34")
-				client.expectDownloadBlock(headerSize, int64(20), data, nil)
-				return nil
+				client.EXPECT().DownloadBlock(gomock.Any(), headerSize, int64(20), gomock.Any()).
+					Do(func(_ context.Context, _ int64, _ int64, w io.Writer) error {
+						_, _ = w.Write(data)
+						return nil
+					})
+				localBackend.EXPECT().Put(gomock.Any(), "test1", int64(10)).DoAndReturn(func(context.Context, string, int64) (string, io.WriteCloser, error) {
+					(*writers)["test1"] = &mockWriteCloser{
+						Buffer: bytes.NewBuffer(nil),
+					}
+					return "test1", (*writers)["test1"], nil
+				})
+				localBackend.EXPECT().Put(gomock.Any(), "test2", int64(10)).DoAndReturn(func(context.Context, string, int64) (string, io.WriteCloser, error) {
+					(*writers)["test2"] = &mockWriteCloser{
+						Buffer: bytes.NewBuffer(nil),
+					}
+					return "test2", (*writers)["test2"], nil
+				})
 			},
 			expectData: map[string][]byte{
 				"test1": []byte("testdata12"),
@@ -508,9 +528,18 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 				},
 				OutputTotalSize: 10,
 			},
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
-				client.expectDownloadBlock(headerSize, int64(len(compressedData)), compressedData, nil)
-				return nil
+			setupMock: func(client *mock.MockDownloadClient, localBackend *local.MockBackend, writers *map[string]*mockWriteCloser, headerSize int64) {
+				client.EXPECT().DownloadBlock(gomock.Any(), headerSize, int64(len(compressedData)), gomock.Any()).
+					Do(func(_ context.Context, _ int64, _ int64, w io.Writer) error {
+						_, _ = w.Write(compressedData)
+						return nil
+					})
+				localBackend.EXPECT().Put(gomock.Any(), "test", int64(len(compressedData))).DoAndReturn(func(context.Context, string, int64) (string, io.WriteCloser, error) {
+					(*writers)["test"] = &mockWriteCloser{
+						Buffer: bytes.NewBuffer(nil),
+					}
+					return "test", (*writers)["test"], nil
+				})
 			},
 			expectData: map[string][]byte{
 				"test": []byte("testdata12"),
@@ -532,27 +561,20 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 			expectData: map[string][]byte{
 				"test": []byte("testdata12"),
 			},
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
+			setupMock: func(client *mock.MockDownloadClient, localBackend *local.MockBackend, writers *map[string]*mockWriteCloser, headerSize int64) {
 				data := []byte("testdata12")
-				client.expectDownloadBlock(headerSize, int64(10), data, nil)
-				return nil
+				client.EXPECT().DownloadBlock(gomock.Any(), headerSize, int64(10), gomock.Any()).
+					Do(func(_ context.Context, _ int64, _ int64, w io.Writer) error {
+						_, _ = w.Write(data)
+						return nil
+					})
+				localBackend.EXPECT().Put(gomock.Any(), "test", int64(10)).DoAndReturn(func(context.Context, string, int64) (string, io.WriteCloser, error) {
+					(*writers)["test"] = &mockWriteCloser{
+						Buffer: bytes.NewBuffer(nil),
+					}
+					return "test", (*writers)["test"], nil
+				})
 			},
-		},
-		{
-			name: "writer error",
-			header: &v1.ActionsCache{
-				Outputs: []*v1.ActionsOutput{
-					{
-						Id:          "test",
-						Offset:      0,
-						Size:        10,
-						Compression: v1.Compression_COMPRESSION_UNSPECIFIED,
-					},
-				},
-				OutputTotalSize: 10,
-			},
-			writerError: true,
-			expectError: true,
 		},
 		{
 			name: "download error",
@@ -567,9 +589,17 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 				},
 				OutputTotalSize: 10,
 			},
-			setupMock: func(client *mockDownloadClient, headerSize int64) error {
-				client.expectDownloadBlock(headerSize, int64(10), nil, errors.New("download error"))
-				return nil
+			setupMock: func(client *mock.MockDownloadClient, localBackend *local.MockBackend, writers *map[string]*mockWriteCloser, headerSize int64) {
+				client.EXPECT().DownloadBlock(gomock.Any(), headerSize, int64(10), gomock.Any()).
+					DoAndReturn(func(context.Context, int64, int64, io.Writer) error {
+						return errors.New("download error")
+					})
+				localBackend.EXPECT().Put(gomock.Any(), "test", int64(10)).DoAndReturn(func(context.Context, string, int64) (string, io.WriteCloser, error) {
+					(*writers)["test"] = &mockWriteCloser{
+						Buffer: bytes.NewBuffer(nil),
+					}
+					return "test", (*writers)["test"], nil
+				})
 			},
 			expectError: true,
 		},
@@ -588,40 +618,21 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &mockDownloadClient{}
-			headerBytes, err := proto.Marshal(tt.header)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			sizeBuf := make([]byte, 8)
-			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
-			headerSize := int64(8 + len(headerBytes))
-
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+			client := mock.NewMockDownloadClient(gomock.NewController(t))
+			localBackend := local.NewMockBackend(gomock.NewController(t))
+			writers := make(map[string]*mockWriteCloser)
 
 			if tt.setupMock != nil {
-				err := tt.setupMock(client, headerSize)
-				if err != nil {
-					t.Fatal(err)
-				}
+				tt.setupMock(client, localBackend, &writers, 0)
 			}
 
-			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
-			if err != nil {
-				t.Fatal(err)
+			downloader := &Downloader{
+				logger: log.DefaultLogger,
+				client: client,
+				header: tt.header,
 			}
 
-			writers := make(map[string]*mockWriteCloser)
-			err = downloader.DownloadAllOutputBlocks(t.Context(), func(_ context.Context, objectID string) (io.WriteCloser, error) {
-				if tt.writerError {
-					return nil, errors.New("writer error")
-				}
-				w := &mockWriteCloser{}
-				writers[objectID] = w
-				return w, nil
-			})
+			err := downloader.DownloadAllOutputBlocks(t.Context(), localBackend)
 
 			if tt.expectError {
 				if err == nil {

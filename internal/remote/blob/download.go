@@ -1,5 +1,7 @@
 package blob
 
+//go:generate go tool mockgen -source=$GOFILE -destination=mock/${GOFILE} -package=mock
+
 import (
 	"context"
 	"encoding/binary"
@@ -47,6 +49,15 @@ func NewDownloader(
 	downloader.header, downloader.headerSize, err = downloader.readHeader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
+	}
+
+	outputIDs := make([]string, 0, len(downloader.header.Outputs))
+	for _, output := range downloader.header.Outputs {
+		outputIDs = append(outputIDs, output.Id)
+	}
+
+	if err := localBackend.Lock(ctx, outputIDs...); err != nil {
+		return nil, fmt.Errorf("lock local cache: %w", err)
 	}
 
 	// Download all output blocks in the background.

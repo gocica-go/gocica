@@ -16,7 +16,9 @@ require (
 require (
 	github.com/DataDog/zstd v1.5.6
 	github.com/felixge/fgprof v0.9.5
+	github.com/google/wire v0.6.0
 	github.com/prometheus/procfs v0.17.0
+	go.uber.org/mock v0.6.0
 )
 
 require (
