@@ -84,7 +84,7 @@ jobs:
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
           CGO_ENABLED: 0
-          GOCACHEPROG: "./${{ env.APP_NAME }} --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv --dev.mutex-prof=./tmp/mutex.prof --dev.block-prof=./tmp/block.prof"
+          GOCACHEPROG: "./${{ env.APP_NAME }} -l debug --dev.cpu-prof=./tmp/cpu.prof --dev.fg-prof=./tmp/fgprof.prof --dev.mem-prof=./tmp/mem.prof --dev.metrics=./tmp/metrics.csv --dev.mutex-prof=./tmp/mutex.prof --dev.block-prof=./tmp/block.prof"
       - name: Upload assets
         uses: actions/upload-artifact@v4
         with:

@@ -1,4 +1,4 @@
-package backend
+package local
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/log"
 )
 
@@ -43,7 +44,7 @@ func TestNewDisk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := tt.setup(t)
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 
 			if tt.wantErr {
 				if err == nil {
@@ -129,7 +130,7 @@ func TestDisk_Get(t *testing.T) {
 				}
 			}
 
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,6 +139,10 @@ func TestDisk_Get(t *testing.T) {
 
 			if tt.isExist {
 				func() {
+					if err := disk.Lock(ctx, outputID); err != nil {
+						t.Fatal(err)
+					}
+
 					_, w, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
 					if err != nil {
 						t.Fatal(err)
@@ -214,13 +219,17 @@ func TestDisk_Put(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			var gotPath string
 			func() {
+				if err := disk.Lock(context.Background(), outputID); err != nil {
+					t.Fatal(err)
+				}
+
 				var w io.WriteCloser
 				gotPath, w, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
 				if err != nil {

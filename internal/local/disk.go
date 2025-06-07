@@ -1,18 +1,18 @@
-package backend
+package local
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/log"
 )
 
-var _ LocalBackend = &Disk{}
+var _ Backend = &Disk{}
 
 type Disk struct {
 	logger   log.Logger
@@ -22,8 +22,8 @@ type Disk struct {
 	objectMap       map[string]*objectLocker
 }
 
-func NewDisk(logger log.Logger, dir string) (*Disk, error) {
-	err := os.MkdirAll(dir, 0755)
+func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
+	err := os.MkdirAll(config.Dir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("create root directory: %w", err)
 	}
@@ -32,11 +32,33 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 
 	disk := &Disk{
 		logger:    logger,
-		rootPath:  dir,
+		rootPath:  config.Dir,
 		objectMap: map[string]*objectLocker{},
 	}
 
 	return disk, nil
+}
+
+func (d *Disk) Lock(_ context.Context, outputIDs ...string) error {
+	d.logger.Debugf("lock waiting")
+	d.objectMapLocker.Lock()
+	defer d.objectMapLocker.Unlock()
+	d.logger.Debugf("lock acquired")
+
+	for _, outputID := range outputIDs {
+		var l *objectLocker
+		var ok bool
+		l, ok = d.objectMap[outputID]
+		if !ok {
+			l = &objectLocker{}
+			d.objectMap[outputID] = l
+		}
+		d.logger.Debugf("lock waiting outputID=%s", outputID)
+		l.l.Lock()
+		d.logger.Debugf("lock acquired outputID=%s", outputID)
+	}
+
+	return nil
 }
 
 type objectLocker struct {
@@ -68,32 +90,30 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 	return d.objectFilePath(outputID), nil
 }
 
-var ErrSizeMismatch = errors.New("size mismatch")
-
+// Put is used to write an output block to the disk.
+// Note: Lock must be acquired **before calling** this method.
 func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.WriteCloser, error) {
 	outputFilePath := d.objectFilePath(outputID)
 
-	var f *os.File
 	f, err := os.Create(outputFilePath)
 	if err != nil {
 		return "", nil, fmt.Errorf("create output file: %w", err)
 	}
-
 	d.logger.Debugf("output file created: path=%s", outputFilePath)
-	var l *objectLocker
+
+	var (
+		l  *objectLocker
+		ok bool
+	)
 	func() {
-		d.objectMapLocker.Lock()
-		defer d.objectMapLocker.Unlock()
-		var ok bool
+		d.objectMapLocker.RLock()
+		defer d.objectMapLocker.RUnlock()
 		l, ok = d.objectMap[outputID]
-		if !ok {
-			l = &objectLocker{}
-			d.objectMap[outputID] = l
-		}
 	}()
-	d.logger.Debugf("write lock waiting outputID=%s", outputID)
-	l.l.Lock()
-	d.logger.Debugf("write lock acquired outputID=%s", outputID)
+	if !ok {
+		return "", nil, fmt.Errorf("object not found: outputID=%s", outputID)
+	}
+
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
 		unlock: sync.OnceFunc(func() {
@@ -118,8 +138,4 @@ func (w *WriteCloserWithUnlock) Close() error {
 
 func (d *Disk) objectFilePath(id string) string {
 	return filepath.Join(d.rootPath, fmt.Sprintf("o-%s", encodeID(id)))
-}
-
-func (d *Disk) Close(context.Context) error {
-	return nil
 }
