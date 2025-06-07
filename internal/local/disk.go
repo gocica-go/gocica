@@ -2,7 +2,6 @@ package local
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,25 +56,6 @@ func (d *Disk) Lock(_ context.Context, outputIDs ...string) error {
 		d.logger.Debugf("lock waiting outputID=%s", outputID)
 		l.l.Lock()
 		d.logger.Debugf("lock acquired outputID=%s", outputID)
-	}
-
-	return nil
-}
-
-func (d *Disk) Unlock(_ context.Context, outputIDs ...string) (err error) {
-	d.logger.Debugf("unlock waiting")
-	d.objectMapLocker.Lock()
-	defer d.objectMapLocker.Unlock()
-	d.logger.Debugf("unlock acquired")
-
-	for _, outputID := range outputIDs {
-		l, ok := d.objectMap[outputID]
-		if !ok {
-			err = errors.Join(err, fmt.Errorf("object not found: outputID=%s", outputID))
-			continue
-		}
-		l.l.Unlock()
-		d.logger.Debugf("unlock released outputID=%s", outputID)
 	}
 
 	return nil

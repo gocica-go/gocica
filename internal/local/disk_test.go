@@ -2,8 +2,6 @@ package local
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -235,10 +233,6 @@ func TestDisk_Put(t *testing.T) {
 				var w io.WriteCloser
 				gotPath, w, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
 				if err != nil {
-					if unlockErr := disk.Unlock(context.Background(), outputID); unlockErr != nil {
-						err = errors.Join(err, fmt.Errorf("unlock local cache: %w", unlockErr))
-					}
-
 					t.Fatal(err)
 				}
 				defer w.Close()
