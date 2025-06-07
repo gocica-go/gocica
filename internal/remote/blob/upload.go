@@ -165,7 +165,7 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 	}
 }
 
-func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64, r io.ReadSeekCloser) error {
+func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, size int64, r io.ReadSeekCloser) error {
 	var (
 		reader      io.ReadSeeker
 		compression v1.Compression
@@ -214,7 +214,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 
 	u.headerLocker.Lock()
 	defer u.headerLocker.Unlock()
-	u.header[outputID] = &v1.IndexEntry{
+	u.header[actionID] = &v1.IndexEntry{
 		OutputId:   outputID,
 		Size:       uploadSize,
 		Timenano:   time.Now().UnixNano(),

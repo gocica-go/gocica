@@ -291,7 +291,7 @@ func (c *GitHubActionsCache) Put(ctx context.Context, actionID, objectID string,
 		return nil
 	}
 
-	if err := c.uploader.UploadOutput(ctx, objectID, size, myio.NopSeekCloser(r)); err != nil {
+	if err := c.uploader.UploadOutput(ctx, actionID, objectID, size, myio.NopSeekCloser(r)); err != nil {
 		return fmt.Errorf("upload output: %w", err)
 	}
 
