@@ -51,7 +51,13 @@ func NewDownloader(
 	}
 
 	outputIDs := make([]string, 0, len(downloader.header.Outputs))
+	outputIDMap := make(map[string]struct{}, len(downloader.header.Outputs))
 	for _, output := range downloader.header.Outputs {
+		if _, ok := outputIDMap[output.Id]; ok {
+			continue
+		}
+		outputIDMap[output.Id] = struct{}{}
+
 		outputIDs = append(outputIDs, output.Id)
 	}
 
