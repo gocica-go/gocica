@@ -276,6 +276,7 @@ func (c *GitHubActionsCache) MetaData(ctx context.Context, actionID string) (*Me
 	}
 
 	if !ok {
+		c.logger.Debugf("entry not found: actionID=%s", actionID)
 		return nil, nil
 	}
 
