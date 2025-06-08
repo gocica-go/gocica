@@ -247,6 +247,7 @@ func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
 func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(context.Context, *Request) error) (err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	defer func() {
+		p.logger.Debugf("decode worker finished")
 		deferErr := eg.Wait()
 		if deferErr != nil {
 			err = errors.Join(err, fmt.Errorf("wait for handler: %w", deferErr))
