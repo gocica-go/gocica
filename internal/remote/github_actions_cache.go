@@ -130,7 +130,12 @@ func (c *GitHubActionsCache) setupUploader(ctx context.Context, downloader *blob
 		return nil, fmt.Errorf("create upload client: %w", err)
 	}
 
-	uploader, err := blob.NewUploader(ctx, c.logger, uploadClient, downloader)
+	var uploader *blob.Uploader
+	if downloader != nil {
+		uploader, err = blob.NewUploader(ctx, c.logger, uploadClient, downloader)
+	} else {
+		uploader, err = blob.NewUploader(ctx, c.logger, uploadClient, nil)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create uploader: %w", err)
 	}
