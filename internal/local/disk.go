@@ -39,38 +39,6 @@ func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
 	return disk, nil
 }
 
-func (d *Disk) Lock(_ context.Context, outputIDs ...string) error {
-	duplicated := make(map[string]struct{}, len(outputIDs))
-	lockers := make([]*objectLocker, 0, len(outputIDs))
-	func() {
-		d.logger.Debugf("lock waiting")
-		d.objectMapLocker.Lock()
-		defer d.objectMapLocker.Unlock()
-		d.logger.Debugf("lock acquired")
-
-		for _, outputID := range outputIDs {
-			l, ok := d.objectMap[outputID]
-			if !ok {
-				l = &objectLocker{}
-				d.objectMap[outputID] = l
-			}
-
-			if _, ok := duplicated[outputID]; !ok {
-				duplicated[outputID] = struct{}{}
-				lockers = append(lockers, l)
-			}
-		}
-	}()
-
-	for i, l := range lockers {
-		d.logger.Debugf("lock waiting(%d/%d)", i+1, len(lockers))
-		l.l.Lock()
-		d.logger.Debugf("lock acquired(%d/%d)", i+1, len(lockers))
-	}
-
-	return nil
-}
-
 type objectLocker struct {
 	l  sync.RWMutex
 	ok bool
@@ -103,40 +71,50 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 	return d.objectFilePath(outputID), nil
 }
 
-// Put is used to write an output block to the disk.
-// Note: Lock must be acquired **before calling** this method.
-func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.WriteCloser, error) {
-	outputFilePath := d.objectFilePath(outputID)
-
-	f, err := os.Create(outputFilePath)
-	if err != nil {
-		return "", nil, fmt.Errorf("create output file: %w", err)
-	}
-	d.logger.Debugf("output file created: path=%s", outputFilePath)
-
+func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, OpenerWithUnlock, error) {
 	var (
 		l  *objectLocker
 		ok bool
 	)
 	func() {
-		d.objectMapLocker.RLock()
-		defer d.objectMapLocker.RUnlock()
+		d.objectMapLocker.Lock()
+		defer d.objectMapLocker.Unlock()
 		l, ok = d.objectMap[outputID]
+		if !ok {
+			l = &objectLocker{}
+			d.objectMap[outputID] = l
+		}
 	}()
-	if !ok {
-		return "", nil, fmt.Errorf("object not found: outputID=%s", outputID)
-	}
 
-	wrapped := &WriteCloserWithUnlock{
-		WriteCloser: f,
-		unlock: sync.OnceFunc(func() {
-			d.logger.Debugf("lock released outputID=%s", outputID)
-			l.ok = true
-			l.l.Unlock()
-		}),
+	outputFilePath := d.objectFilePath(outputID)
+	l.l.Lock()
+	wrapped := &FileOpenerWithUnlock{
+		filePath: outputFilePath,
+		l:        l,
 	}
 
 	return outputFilePath, wrapped, nil
+}
+
+type FileOpenerWithUnlock struct {
+	filePath string
+	l        *objectLocker
+}
+
+func (f *FileOpenerWithUnlock) Open() (io.WriteCloser, error) {
+	file, err := os.Create(f.filePath)
+	if err != nil {
+		f.l.l.Unlock()
+		return nil, fmt.Errorf("create output file: %w", err)
+	}
+
+	return &WriteCloserWithUnlock{
+		WriteCloser: file,
+		unlock: sync.OnceFunc(func() {
+			f.l.l.Unlock()
+			f.l.ok = true
+		}),
+	}, nil
 }
 
 type WriteCloserWithUnlock struct {

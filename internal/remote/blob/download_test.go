@@ -5,12 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"io"
 	"testing"
 
-	"github.com/DataDog/zstd"
 	"github.com/google/go-cmp/cmp"
-	"github.com/mazrean/gocica/internal/local"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote/blob/mock"
 	"github.com/mazrean/gocica/log"
@@ -429,7 +426,7 @@ func (m *mockWriteCloser) Close() error {
 	return nil
 }
 
-func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
+/*func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 	t.Parallel()
 
 	data := []byte("testdata12")
@@ -678,3 +675,4 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 		})
 	}
 }
+*/

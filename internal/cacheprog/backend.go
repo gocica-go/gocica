@@ -133,21 +133,21 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 			return nil
 		})
 
-		err = b.local.Lock(ctx, outputID)
-		if err != nil {
-			err = fmt.Errorf("lock local cache: %w", err)
-			return
-		}
-
-		var w io.WriteCloser
-		diskPath, w, err = b.local.Put(ctx, outputID, size)
+		var opener local.OpenerWithUnlock
+		diskPath, opener, err = b.local.Put(ctx, outputID, size)
 		if err != nil {
 			err = fmt.Errorf("put: %w", err)
 			return
 		}
-		defer w.Close()
 
-		if _, cpErr := io.Copy(w, localReader); cpErr != nil {
+		f, err := opener.Open()
+		if err != nil {
+			err = fmt.Errorf("open local cache: %w", err)
+			return
+		}
+		defer f.Close()
+
+		if _, cpErr := io.Copy(f, localReader); cpErr != nil {
 			err = fmt.Errorf("copy: %w", cpErr)
 			return
 		}

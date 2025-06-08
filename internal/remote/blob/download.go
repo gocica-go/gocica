@@ -50,29 +50,37 @@ func NewDownloader(
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
-	outputIDs := make([]string, 0, len(downloader.header.Outputs))
-	outputIDMap := make(map[string]struct{}, len(downloader.header.Outputs))
-	for _, output := range downloader.header.Outputs {
-		if _, ok := outputIDMap[output.Id]; ok {
-			continue
-		}
-		outputIDMap[output.Id] = struct{}{}
-
-		outputIDs = append(outputIDs, output.Id)
-	}
-
-	if err := localBackend.Lock(ctx, outputIDs...); err != nil {
-		return nil, fmt.Errorf("lock local cache: %w", err)
+	outputsWithOpenerMap, err := downloader.createOutputWithOpenerMap(ctx, downloader.header.Outputs, localBackend)
+	if err != nil {
+		return nil, fmt.Errorf("create output with openers: %w", err)
 	}
 
 	// Download all output blocks in the background.
 	go func() {
-		if err := downloader.DownloadAllOutputBlocks(context.Background(), localBackend); err != nil {
+		if err := downloader.DownloadAllOutputBlocks(context.Background(), outputsWithOpenerMap); err != nil {
 			logger.Errorf("download all output blocks: %v", err)
 		}
 	}()
 
 	return downloader, nil
+}
+
+func (d *Downloader) createOutputWithOpenerMap(ctx context.Context, outputs []*v1.ActionsOutput, localBackend local.Backend) (map[string]local.OpenerWithUnlock, error) {
+	outputsWithOpeners := make(map[string]local.OpenerWithUnlock, len(outputs))
+	for _, output := range outputs {
+		if _, ok := outputsWithOpeners[output.Id]; ok {
+			continue
+		}
+
+		_, opener, err := localBackend.Put(ctx, output.Id, output.Size)
+		if err != nil {
+			return nil, fmt.Errorf("put local cache: %w", err)
+		}
+
+		outputsWithOpeners[output.Id] = opener
+	}
+
+	return outputsWithOpeners, nil
 }
 
 func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, headerSize int64, err error) {
@@ -121,7 +129,7 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 
 const maxChunkSize = 4 * (1 << 20)
 
-func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend local.Backend) error {
+func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpenerMap map[string]local.OpenerWithUnlock) error {
 	outputs := d.header.Outputs
 	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
 		return int(x.Offset - y.Offset)
@@ -143,9 +151,14 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, localBackend l
 
 			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.Id)
 
-			_, w, err := localBackend.Put(ctx, outputs[i].Id, outputs[i].Size)
+			opener, ok := outputsWithOpenerMap[output.Id]
+			if !ok {
+				return fmt.Errorf("object writer not found: outputID=%s", output.Id)
+			}
+
+			w, err := opener.Open()
 			if err != nil {
-				return fmt.Errorf("get object writer: %w", err)
+				return fmt.Errorf("open object writer: %w", err)
 			}
 			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 

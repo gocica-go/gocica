@@ -2,7 +2,6 @@ package local
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -139,17 +138,18 @@ func TestDisk_Get(t *testing.T) {
 
 			if tt.isExist {
 				func() {
-					if err := disk.Lock(ctx, outputID); err != nil {
-						t.Fatal(err)
-					}
-
-					_, w, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
+					_, opener, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer w.Close()
 
-					if _, err := w.Write(tt.setupData); err != nil {
+					f, err := opener.Open()
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer f.Close()
+
+					if _, err := f.Write(tt.setupData); err != nil {
 						t.Fatal(err)
 					}
 				}()
@@ -226,18 +226,19 @@ func TestDisk_Put(t *testing.T) {
 
 			var gotPath string
 			func() {
-				if err := disk.Lock(context.Background(), outputID); err != nil {
-					t.Fatal(err)
-				}
-
-				var w io.WriteCloser
-				gotPath, w, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
+				var opener OpenerWithUnlock
+				gotPath, opener, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer w.Close()
 
-				if _, err := w.Write(tt.data); err != nil {
+				f, err := opener.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+
+				if _, err := f.Write(tt.data); err != nil {
 					t.Fatal(err)
 				}
 			}()
