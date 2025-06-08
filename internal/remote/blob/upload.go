@@ -204,22 +204,32 @@ func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, 
 		}
 	}
 
-	u.outputsLocker.Lock()
-	defer u.outputsLocker.Unlock()
-	u.outputs = append(u.outputs, &v1.ActionsOutput{
-		Id:          outputID,
-		Size:        uploadSize,
-		Compression: compression,
-	})
+	func() {
+		u.logger.Debugf("append output lock waiting: actionID=%s, outputID=%s", actionID, outputID)
+		u.outputsLocker.Lock()
+		defer u.outputsLocker.Unlock()
+		u.logger.Debugf("append output lock acquired: actionID=%s, outputID=%s", actionID, outputID)
 
-	u.headerLocker.Lock()
-	defer u.headerLocker.Unlock()
-	u.header[actionID] = &v1.IndexEntry{
-		OutputId:   outputID,
-		Size:       uploadSize,
-		Timenano:   time.Now().UnixNano(),
-		LastUsedAt: u.nowTimestamp,
-	}
+		u.outputs = append(u.outputs, &v1.ActionsOutput{
+			Id:          outputID,
+			Size:        uploadSize,
+			Compression: compression,
+		})
+	}()
+
+	func() {
+		u.logger.Debugf("update entry lock waiting: actionID=%s, outputID=%s", actionID, outputID)
+		u.headerLocker.Lock()
+		defer u.headerLocker.Unlock()
+		u.logger.Debugf("update entry lock acquired: actionID=%s, outputID=%s", actionID, outputID)
+
+		u.header[actionID] = &v1.IndexEntry{
+			OutputId:   outputID,
+			Size:       uploadSize,
+			Timenano:   time.Now().UnixNano(),
+			LastUsedAt: u.nowTimestamp,
+		}
+	}()
 
 	return nil
 }
@@ -227,8 +237,11 @@ func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, 
 func (u *Uploader) UpdateEntry(_ context.Context, actionID string, entry *v1.IndexEntry) error {
 	entry.LastUsedAt = u.nowTimestamp
 
+	u.logger.Debugf("update entry lock waiting: actionID=%s, outputID=%s", actionID, entry.OutputId)
 	u.headerLocker.Lock()
 	defer u.headerLocker.Unlock()
+	u.logger.Debugf("update entry lock acquired: actionID=%s, outputID=%s", actionID, entry.OutputId)
+
 	u.header[actionID] = entry
 
 	return nil
@@ -296,7 +309,15 @@ func (u *Uploader) Commit(ctx context.Context) (int64, error) {
 
 	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
 
-	headerBuf, err := u.createHeader(u.header, outputs, outputSize)
+	var headerBuf []byte
+	func() {
+		u.logger.Debugf("create header lock waiting")
+		u.headerLocker.RLock()
+		defer u.headerLocker.RUnlock() //nolint:errcheck
+		u.logger.Debugf("create header lock acquired")
+
+		headerBuf, err = u.createHeader(u.header, outputs, outputSize)
+	}()
 	if err != nil {
 		return 0, fmt.Errorf("create header: %w", err)
 	}
