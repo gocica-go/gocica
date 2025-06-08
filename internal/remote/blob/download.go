@@ -61,9 +61,9 @@ func NewDownloader(
 		outputIDs = append(outputIDs, output.Id)
 	}
 
-	if err := localBackend.Lock(ctx, outputIDs...); err != nil {
+	/*if err := localBackend.Lock(ctx, outputIDs...); err != nil {
 		return nil, fmt.Errorf("lock local cache: %w", err)
-	}
+	}*/
 
 	// Download all output blocks in the background.
 	go func() {
