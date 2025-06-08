@@ -272,6 +272,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 		err = dr.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				p.logger.Debugf("EOF")
 				return nil
 			}
 			err = fmt.Errorf("next request: %w", err)
@@ -282,6 +283,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 		err = decoder.Decode(&req)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				p.logger.Debugf("EOF")
 				return nil
 			}
 
@@ -295,6 +297,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			err = dr.Next()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
+					p.logger.Debugf("EOF")
 					return nil
 				}
 				return fmt.Errorf("next request body: %w", err)
