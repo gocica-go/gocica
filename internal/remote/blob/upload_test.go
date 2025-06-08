@@ -273,6 +273,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 				client:       client,
 				nowTimestamp: timestamppb.Now(),
 				header:       make(map[string]*v1.IndexEntry),
+				outputMap:    make(map[string]int64),
 			}
 
 			reader, err := tt.setupMock(client)
