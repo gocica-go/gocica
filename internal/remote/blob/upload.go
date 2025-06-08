@@ -235,6 +235,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, 
 }
 
 func (u *Uploader) UpdateEntry(_ context.Context, actionID string, entry *v1.IndexEntry) error {
+	u.logger.Debugf("update entry: actionID=%s, outputID=%s", actionID, entry.OutputId)
 	entry.LastUsedAt = u.nowTimestamp
 
 	u.logger.Debugf("update entry lock waiting: actionID=%s, outputID=%s", actionID, entry.OutputId)
