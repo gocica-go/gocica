@@ -72,8 +72,11 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 		ok bool
 	)
 	func() {
+		d.logger.Debugf("read object map lock waiting: outputID=%s", outputID)
 		d.objectMapLocker.RLock()
 		defer d.objectMapLocker.RUnlock()
+		d.logger.Debugf("read object map lock acquired: outputID=%s", outputID)
+
 		l, ok = d.objectMap[outputID]
 	}()
 	if !ok {

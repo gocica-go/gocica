@@ -270,9 +270,13 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 }
 
 func (c *GitHubActionsCache) MetaData(ctx context.Context, actionID string) (*MetaData, error) {
-	entry, err := c.downloader.GetEntry(ctx, actionID)
+	entry, ok, err := c.downloader.GetEntry(ctx, actionID)
 	if err != nil {
 		return nil, fmt.Errorf("get entry: %w", err)
+	}
+
+	if !ok {
+		return nil, nil
 	}
 
 	if err := c.uploader.UpdateEntry(ctx, actionID, entry); err != nil {
