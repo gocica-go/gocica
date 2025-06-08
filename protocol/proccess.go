@@ -149,23 +149,13 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		// Perform cleanup and collect any errors that occur
 		deferErr := p.close(ctx)
 		if deferErr != nil {
-			deferErr = fmt.Errorf("close process: %w", deferErr)
-			if err == nil {
-				err = deferErr
-			} else {
-				err = errors.Join(err, deferErr)
-			}
+			err = errors.Join(err, fmt.Errorf("close process: %w", deferErr))
 		}
 
 		// Wait for encoder goroutine to finish and handle any errors
 		deferErr = eg.Wait()
 		if deferErr != nil {
-			deferErr = fmt.Errorf("wait for encoder: %w", deferErr)
-			if err == nil {
-				err = deferErr
-			} else {
-				err = errors.Join(err, deferErr)
-			}
+			err = errors.Join(err, fmt.Errorf("wait for encoder: %w", deferErr))
 		}
 	}()
 
@@ -259,12 +249,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 	defer func() {
 		deferErr := eg.Wait()
 		if deferErr != nil {
-			deferErr = fmt.Errorf("wait for handler: %w", deferErr)
-			if err == nil {
-				err = deferErr
-			} else {
-				err = errors.Join(err, deferErr)
-			}
+			err = errors.Join(err, fmt.Errorf("wait for handler: %w", deferErr))
 		}
 	}()
 
