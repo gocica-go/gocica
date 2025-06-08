@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
@@ -30,8 +32,10 @@ type Uploader struct {
 
 	client UploadClient
 
+	s             singleflight.Group
 	outputsLocker sync.RWMutex
 	outputs       []*v1.ActionsOutput
+	outputMap     map[string]int64
 
 	nowTimestamp *timestamppb.Timestamp
 	headerLocker sync.RWMutex
@@ -166,56 +170,81 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 }
 
 func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, size int64, r io.ReadSeekCloser) error {
-	var (
-		reader      io.ReadSeeker
-		compression v1.Compression
-	)
-	if size > 100*(2^10) {
-		buf := bytes.NewBuffer(nil)
-		zw := zstd.NewWriterLevel(buf, 1)
-
-		var err error
-		compressGauge.Stopwatch(func() {
-			_, err = io.Copy(zw, r)
-		}, "compress_data")
-		if err != nil {
-			return fmt.Errorf("compress data: %w", err)
+	iUploadSize, err, _ := u.s.Do(outputID, func() (any, error) {
+		var (
+			uploadSize int64
+			ok         bool
+		)
+		func() {
+			u.outputsLocker.RLock()
+			defer u.outputsLocker.RUnlock()
+			uploadSize, ok = u.outputMap[outputID]
+		}()
+		if ok {
+			return uploadSize, nil
 		}
 
-		if err := zw.Close(); err != nil {
-			return fmt.Errorf("close compressor: %w", err)
+		var (
+			reader      io.ReadSeeker
+			compression v1.Compression
+		)
+		if size > 100*(2^10) {
+			buf := bytes.NewBuffer(nil)
+			zw := zstd.NewWriterLevel(buf, 1)
+
+			var err error
+			compressGauge.Stopwatch(func() {
+				_, err = io.Copy(zw, r)
+			}, "compress_data")
+			if err != nil {
+				return uint64(0), fmt.Errorf("compress data: %w", err)
+			}
+
+			if err := zw.Close(); err != nil {
+				return uint64(0), fmt.Errorf("close compressor: %w", err)
+			}
+
+			reader = bytes.NewReader(buf.Bytes())
+			compression = v1.Compression_COMPRESSION_ZSTD
+		} else {
+			reader = r
+			compression = v1.Compression_COMPRESSION_UNSPECIFIED
 		}
 
-		reader = bytes.NewReader(buf.Bytes())
-		compression = v1.Compression_COMPRESSION_ZSTD
-	} else {
-		reader = r
-		compression = v1.Compression_COMPRESSION_UNSPECIFIED
+		if size == 0 {
+			uploadSize = 0
+		} else {
+			var err error
+			uploadSize, err = u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(reader))
+			if err != nil {
+				return uint64(0), fmt.Errorf("upload block: %w", err)
+			}
+		}
+
+		func() {
+			u.logger.Debugf("append output lock waiting: actionID=%s, outputID=%s", actionID, outputID)
+			u.outputsLocker.Lock()
+			defer u.outputsLocker.Unlock()
+			u.logger.Debugf("append output lock acquired: actionID=%s, outputID=%s", actionID, outputID)
+
+			u.outputs = append(u.outputs, &v1.ActionsOutput{
+				Id:          outputID,
+				Size:        uploadSize,
+				Compression: compression,
+			})
+			u.outputMap[outputID] = uploadSize
+		}()
+
+		return uploadSize, nil
+	})
+	if err != nil {
+		return fmt.Errorf("upload output: %w", err)
 	}
 
-	var uploadSize int64
-	if size == 0 {
-		uploadSize = 0
-	} else {
-		var err error
-		uploadSize, err = u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(reader))
-		if err != nil {
-			return fmt.Errorf("upload block: %w", err)
-		}
+	uploadSize, ok := iUploadSize.(int64)
+	if !ok {
+		return fmt.Errorf("upload size is not int64: %v", iUploadSize)
 	}
-
-	func() {
-		u.logger.Debugf("append output lock waiting: actionID=%s, outputID=%s", actionID, outputID)
-		u.outputsLocker.Lock()
-		defer u.outputsLocker.Unlock()
-		u.logger.Debugf("append output lock acquired: actionID=%s, outputID=%s", actionID, outputID)
-
-		u.outputs = append(u.outputs, &v1.ActionsOutput{
-			Id:          outputID,
-			Size:        uploadSize,
-			Compression: compression,
-		})
-	}()
 
 	func() {
 		u.logger.Debugf("update entry lock waiting: actionID=%s, outputID=%s", actionID, outputID)

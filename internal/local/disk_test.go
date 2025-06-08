@@ -17,7 +17,7 @@ func TestNewDisk(t *testing.T) {
 	tests := []struct {
 		name          string
 		wantErr       bool
-		wantObjectMap map[string]*objectLocker
+		wantObjectMap map[string]<-chan struct{}
 		setup         func(t *testing.T) string
 	}{
 		{
@@ -25,7 +25,7 @@ func TestNewDisk(t *testing.T) {
 			setup: func(t *testing.T) string {
 				return t.TempDir()
 			},
-			wantObjectMap: map[string]*objectLocker{},
+			wantObjectMap: map[string]<-chan struct{}{},
 		},
 		{
 			name:    "error on directory creation",

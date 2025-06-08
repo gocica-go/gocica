@@ -104,16 +104,6 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	defer requestGauge.Set(0, "put")
 
 	durationGauge.Stopwatch(func() {
-		diskPath, err = b.local.Get(ctx, outputID)
-		if err != nil {
-			err = fmt.Errorf("get local cache: %w", err)
-			return
-		}
-
-		if diskPath != "" {
-			return
-		}
-
 		var (
 			remoteReader io.ReadSeeker
 			localReader  io.Reader
@@ -138,6 +128,9 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		diskPath, opener, err = b.local.Put(ctx, outputID, size)
 		if err != nil {
 			err = fmt.Errorf("put: %w", err)
+			return
+		}
+		if opener == nil {
 			return
 		}
 
