@@ -40,22 +40,32 @@ func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
 }
 
 func (d *Disk) Lock(_ context.Context, outputIDs ...string) error {
-	d.logger.Debugf("lock waiting")
-	d.objectMapLocker.Lock()
-	defer d.objectMapLocker.Unlock()
-	d.logger.Debugf("lock acquired")
+	duplicated := make(map[string]struct{}, len(outputIDs))
+	lockers := make([]*objectLocker, 0, len(outputIDs))
+	func() {
+		d.logger.Debugf("lock waiting")
+		d.objectMapLocker.Lock()
+		defer d.objectMapLocker.Unlock()
+		d.logger.Debugf("lock acquired")
 
-	for _, outputID := range outputIDs {
-		var l *objectLocker
-		var ok bool
-		l, ok = d.objectMap[outputID]
-		if !ok {
-			l = &objectLocker{}
-			d.objectMap[outputID] = l
+		for _, outputID := range outputIDs {
+			l, ok := d.objectMap[outputID]
+			if !ok {
+				l = &objectLocker{}
+				d.objectMap[outputID] = l
+			}
+
+			if _, ok := duplicated[outputID]; !ok {
+				duplicated[outputID] = struct{}{}
+				lockers = append(lockers, l)
+			}
 		}
-		d.logger.Debugf("lock waiting outputID=%s", outputID)
+	}()
+
+	for i, l := range lockers {
+		d.logger.Debugf("lock waiting(%d/%d)", i+1, len(lockers))
 		l.l.Lock()
-		d.logger.Debugf("lock acquired outputID=%s", outputID)
+		d.logger.Debugf("lock acquired(%d/%d)", i+1, len(lockers))
 	}
 
 	return nil
