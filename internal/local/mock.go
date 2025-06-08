@@ -56,31 +56,12 @@ func (mr *MockBackendMockRecorder) Get(ctx, outputID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockBackend)(nil).Get), ctx, outputID)
 }
 
-// Lock mocks base method.
-func (m *MockBackend) Lock(ctx context.Context, outputIDs ...string) error {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx}
-	for _, a := range outputIDs {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "Lock", varargs...)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Lock indicates an expected call of Lock.
-func (mr *MockBackendMockRecorder) Lock(ctx any, outputIDs ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx}, outputIDs...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Lock", reflect.TypeOf((*MockBackend)(nil).Lock), varargs...)
-}
-
 // Put mocks base method.
-func (m *MockBackend) Put(ctx context.Context, outputID string, size int64) (string, io.WriteCloser, error) {
+func (m *MockBackend) Put(ctx context.Context, outputID string, size int64) (string, OpenerWithUnlock, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Put", ctx, outputID, size)
 	ret0, _ := ret[0].(string)
-	ret1, _ := ret[1].(io.WriteCloser)
+	ret1, _ := ret[1].(OpenerWithUnlock)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
@@ -89,4 +70,43 @@ func (m *MockBackend) Put(ctx context.Context, outputID string, size int64) (str
 func (mr *MockBackendMockRecorder) Put(ctx, outputID, size any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Put", reflect.TypeOf((*MockBackend)(nil).Put), ctx, outputID, size)
+}
+
+// MockOpenerWithUnlock is a mock of OpenerWithUnlock interface.
+type MockOpenerWithUnlock struct {
+	ctrl     *gomock.Controller
+	recorder *MockOpenerWithUnlockMockRecorder
+	isgomock struct{}
+}
+
+// MockOpenerWithUnlockMockRecorder is the mock recorder for MockOpenerWithUnlock.
+type MockOpenerWithUnlockMockRecorder struct {
+	mock *MockOpenerWithUnlock
+}
+
+// NewMockOpenerWithUnlock creates a new mock instance.
+func NewMockOpenerWithUnlock(ctrl *gomock.Controller) *MockOpenerWithUnlock {
+	mock := &MockOpenerWithUnlock{ctrl: ctrl}
+	mock.recorder = &MockOpenerWithUnlockMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockOpenerWithUnlock) EXPECT() *MockOpenerWithUnlockMockRecorder {
+	return m.recorder
+}
+
+// Open mocks base method.
+func (m *MockOpenerWithUnlock) Open() (io.WriteCloser, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Open")
+	ret0, _ := ret[0].(io.WriteCloser)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Open indicates an expected call of Open.
+func (mr *MockOpenerWithUnlockMockRecorder) Open() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Open", reflect.TypeOf((*MockOpenerWithUnlock)(nil).Open))
 }
