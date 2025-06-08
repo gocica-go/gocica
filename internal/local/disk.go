@@ -19,7 +19,7 @@ type Disk struct {
 	rootPath string
 
 	objectMapLocker sync.RWMutex
-	objectMap       map[string]*objectLocker
+	objectMap       map[string]<-chan struct{}
 }
 
 func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
@@ -33,20 +33,15 @@ func NewDisk(logger log.Logger, config *config.Config) (*Disk, error) {
 	disk := &Disk{
 		logger:    logger,
 		rootPath:  config.Dir,
-		objectMap: map[string]*objectLocker{},
+		objectMap: map[string]<-chan struct{}{},
 	}
 
 	return disk, nil
 }
 
-type objectLocker struct {
-	l  sync.RWMutex
-	ok bool
-}
-
-func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err error) {
+func (d *Disk) Get(ctx context.Context, outputID string) (diskPath string, err error) {
 	var (
-		l  *objectLocker
+		l  <-chan struct{}
 		ok bool
 	)
 	func() {
@@ -61,36 +56,63 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 		return "", nil
 	}
 
-	d.logger.Debugf("read lock waiting outputID=%s", outputID)
-	l.l.RLock()
-	defer l.l.RUnlock()
-	d.logger.Debugf("read lock acquired outputID=%s", outputID)
-	if !l.ok {
-		return "", nil
+	select {
+	case <-l:
+		func() {
+			d.objectMapLocker.RLock()
+			defer d.objectMapLocker.RUnlock()
+			l = d.objectMap[outputID]
+		}()
+		if l == nil {
+			return "", nil
+		}
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
+
 	return d.objectFilePath(outputID), nil
 }
 
-func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, OpenerWithUnlock, error) {
+func (d *Disk) Put(ctx context.Context, outputID string, _ int64) (string, OpenerWithUnlock, error) {
 	var (
-		l  *objectLocker
-		ok bool
+		l       <-chan struct{}
+		newChan chan struct{}
 	)
 	func() {
 		d.objectMapLocker.Lock()
 		defer d.objectMapLocker.Unlock()
-		l, ok = d.objectMap[outputID]
-		if !ok {
-			l = &objectLocker{}
-			d.objectMap[outputID] = l
+		l = d.objectMap[outputID]
+		if l == nil {
+			newChan = make(chan struct{})
+			d.objectMap[outputID] = newChan
 		}
 	}()
-
 	outputFilePath := d.objectFilePath(outputID)
-	l.l.Lock()
+	if l != nil {
+		select {
+		case <-l:
+			func() {
+				d.objectMapLocker.RLock()
+				defer d.objectMapLocker.RUnlock()
+				l = d.objectMap[outputID]
+			}()
+			if l != nil {
+				return outputFilePath, nil, nil
+			}
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		}
+	}
+
 	wrapped := &FileOpenerWithUnlock{
 		filePath: outputFilePath,
-		l:        l,
+		l:        newChan,
+		onFailed: func() {
+			d.objectMapLocker.Lock()
+			defer d.objectMapLocker.Unlock()
+			delete(d.objectMap, outputID)
+			close(newChan)
+		},
 	}
 
 	return outputFilePath, wrapped, nil
@@ -98,21 +120,21 @@ func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, OpenerW
 
 type FileOpenerWithUnlock struct {
 	filePath string
-	l        *objectLocker
+	l        chan<- struct{}
+	onFailed func()
 }
 
 func (f *FileOpenerWithUnlock) Open() (io.WriteCloser, error) {
 	file, err := os.Create(f.filePath)
 	if err != nil {
-		f.l.l.Unlock()
+		f.onFailed()
 		return nil, fmt.Errorf("create output file: %w", err)
 	}
 
 	return &WriteCloserWithUnlock{
 		WriteCloser: file,
 		unlock: sync.OnceFunc(func() {
-			f.l.l.Unlock()
-			f.l.ok = true
+			close(f.l)
 		}),
 	}, nil
 }
