@@ -133,11 +133,11 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 			return nil
 		})
 
-		/*err = b.local.Lock(ctx, outputID)
+		err = b.local.Lock(ctx, outputID)
 		if err != nil {
 			err = fmt.Errorf("lock local cache: %w", err)
 			return
-		}*/
+		}
 
 		var w io.WriteCloser
 		diskPath, w, err = b.local.Put(ctx, outputID, size)

@@ -109,18 +109,14 @@ func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.Writ
 		ok bool
 	)
 	func() {
-		d.objectMapLocker.Lock()
-		defer d.objectMapLocker.Unlock()
+		d.objectMapLocker.RLock()
+		defer d.objectMapLocker.RUnlock()
 		l, ok = d.objectMap[outputID]
-		if !ok {
-			l = &objectLocker{}
-			d.objectMap[outputID] = l
-		}
 	}()
+	if !ok {
+		return "", nil, fmt.Errorf("object not found: outputID=%s", outputID)
+	}
 
-	d.logger.Debugf("lock waiting outputID=%s", outputID)
-	l.l.Lock()
-	d.logger.Debugf("lock acquired outputID=%s", outputID)
 	wrapped := &WriteCloserWithUnlock{
 		WriteCloser: f,
 		unlock: sync.OnceFunc(func() {
