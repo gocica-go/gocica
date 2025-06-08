@@ -102,7 +102,7 @@ func WithDebugStdinLeakFile(file string) ProcessOption {
 func NewProcess(options ...ProcessOption) *Process {
 	o := &processOption{
 		logger:             log.DefaultLogger,
-		responseBufferSize: 100, // デフォルト値
+		responseBufferSize: 100, // default value
 	}
 	for _, option := range options {
 		option(o)
