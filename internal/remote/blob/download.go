@@ -102,8 +102,9 @@ func (d *Downloader) GetEntries(context.Context) (entries map[string]*v1.IndexEn
 	return d.header.Entries, nil
 }
 
-func (d *Downloader) GetEntry(_ context.Context, actionID string) (metadata *v1.IndexEntry, err error) {
-	return d.header.Entries[actionID], nil
+func (d *Downloader) GetEntry(_ context.Context, actionID string) (metadata *v1.IndexEntry, ok bool, err error) {
+	metadata, ok = d.header.Entries[actionID]
+	return metadata, ok, nil
 }
 
 func (d *Downloader) GetOutputs(context.Context) (outputs []*v1.ActionsOutput, err error) {

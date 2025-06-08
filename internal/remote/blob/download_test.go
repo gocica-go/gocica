@@ -266,6 +266,7 @@ func TestDownloader_GetEntry(t *testing.T) {
 		name        string
 		header      *v1.ActionsCache
 		expectEntry *v1.IndexEntry
+		expectOK    bool
 	}{
 		{
 			name: "success with single entry",
@@ -281,6 +282,7 @@ func TestDownloader_GetEntry(t *testing.T) {
 				OutputId: "test",
 				Size:     100,
 			},
+			expectOK: true,
 		},
 		{
 			name: "success with multiple entries",
@@ -300,6 +302,7 @@ func TestDownloader_GetEntry(t *testing.T) {
 				OutputId: "test1",
 				Size:     100,
 			},
+			expectOK: true,
 		},
 	}
 
@@ -314,13 +317,16 @@ func TestDownloader_GetEntry(t *testing.T) {
 				header: tt.header,
 			}
 
-			entry, err := downloader.GetEntry(t.Context(), "test")
+			entry, ok, err := downloader.GetEntry(t.Context(), "test")
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			if diff := cmp.Diff(tt.expectEntry, entry, protocmp.Transform()); diff != "" {
 				t.Errorf("entry mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tt.expectOK, ok); diff != "" {
+				t.Errorf("ok mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
