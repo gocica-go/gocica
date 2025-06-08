@@ -58,13 +58,10 @@ func NewCombinedBackend(logger log.Logger, local local.Backend, remote remote.Ba
 }
 
 func (b *CombinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
-	b.logger.Debugf("get: actionID=%s", actionID)
 	requestGauge.Set(1, "get")
 	defer requestGauge.Set(0, "get")
-	b.logger.Debugf("get: request gauge set")
 
 	durationGauge.Stopwatch(func() {
-		b.logger.Debugf("get: duration gauge stopwatch")
 		var indexEntry *remote.MetaData
 		indexEntry, err = b.remote.MetaData(ctx, actionID)
 		if err != nil {

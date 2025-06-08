@@ -270,21 +270,16 @@ func (c *GitHubActionsCache) commitCacheEntry(ctx context.Context, key string, s
 }
 
 func (c *GitHubActionsCache) MetaData(ctx context.Context, actionID string) (*MetaData, error) {
-	c.logger.Debugf("get meta data: actionID=%s", actionID)
 	if c.downloader == nil {
-		c.logger.Debugf("downloader is nil")
 		return nil, nil
 	}
 
 	entry, ok, err := c.downloader.GetEntry(ctx, actionID)
 	if err != nil {
-		c.logger.Debugf("get entry error: %v", err)
 		return nil, fmt.Errorf("get entry: %w", err)
 	}
-	c.logger.Debugf("get entry: entry=%+v, ok=%v", entry, ok)
 
 	if !ok {
-		c.logger.Debugf("entry not found: actionID=%s", actionID)
 		return nil, nil
 	}
 
