@@ -69,6 +69,7 @@ func NewUploader(
 			logger:       logger,
 			client:       client,
 			nowTimestamp: timestamppb.Now(),
+			outputMap:    make(map[string]int64),
 			header:       make(map[string]*v1.IndexEntry),
 			waitBaseFunc: func() ([]string, int64, []*v1.ActionsOutput, error) {
 				return nil, 0, nil, nil
@@ -94,6 +95,7 @@ func NewUploader(
 		client:       client,
 		nowTimestamp: timestamppb.Now(),
 		header:       newEntries,
+		outputMap:    make(map[string]int64),
 	}
 
 	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
