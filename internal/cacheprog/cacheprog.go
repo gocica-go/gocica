@@ -59,7 +59,7 @@ func (cp *CacheProg) Get(ctx context.Context, req *protocol.Request, res *protoc
 	}
 
 	atomic.AddUint64(&cp.hitCount, 1)
-	cp.logger.Debugf("action %s found", req.ActionID)
+	cp.logger.Debugf("action %s found(outputID: %s, diskPath: %s)", req.ActionID, meta.OutputID, diskPath)
 	res.DiskPath = diskPath
 	res.OutputID = meta.OutputID
 	res.Size = meta.Size

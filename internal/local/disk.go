@@ -104,14 +104,24 @@ func (d *Disk) Put(ctx context.Context, outputID string, _ int64) (string, Opene
 		}
 	}
 
+	once := &sync.Once{}
 	wrapped := &FileOpenerWithUnlock{
 		filePath: outputFilePath,
 		l:        newChan,
+		onSucceeded: func() {
+			once.Do(func() {
+				d.logger.Debugf("close object map: outputID=%s", outputID)
+				close(newChan)
+			})
+		},
 		onFailed: func() {
-			d.objectMapLocker.Lock()
-			defer d.objectMapLocker.Unlock()
-			delete(d.objectMap, outputID)
-			close(newChan)
+			once.Do(func() {
+				d.objectMapLocker.Lock()
+				defer d.objectMapLocker.Unlock()
+				d.logger.Debugf("delete object map: outputID=%s", outputID)
+				delete(d.objectMap, outputID)
+				close(newChan)
+			})
 		},
 	}
 
@@ -119,9 +129,10 @@ func (d *Disk) Put(ctx context.Context, outputID string, _ int64) (string, Opene
 }
 
 type FileOpenerWithUnlock struct {
-	filePath string
-	l        chan<- struct{}
-	onFailed func()
+	filePath    string
+	l           chan<- struct{}
+	onSucceeded func()
+	onFailed    func()
 }
 
 func (f *FileOpenerWithUnlock) Open() (io.WriteCloser, error) {
@@ -133,9 +144,7 @@ func (f *FileOpenerWithUnlock) Open() (io.WriteCloser, error) {
 
 	return &WriteCloserWithUnlock{
 		WriteCloser: file,
-		unlock: sync.OnceFunc(func() {
-			close(f.l)
-		}),
+		unlock:      f.onSucceeded,
 	}, nil
 }
 
