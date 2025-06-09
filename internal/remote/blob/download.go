@@ -77,7 +77,9 @@ func (d *Downloader) createOutputWithOpenerMap(ctx context.Context, outputs []*v
 			return nil, fmt.Errorf("put local cache: %w", err)
 		}
 
-		outputsWithOpeners[output.Id] = opener
+		if opener != nil {
+			outputsWithOpeners[output.Id] = opener
+		}
 	}
 
 	return outputsWithOpeners, nil
@@ -210,6 +212,8 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 	if err := eg.Wait(); err != nil {
 		return err
 	}
+
+	d.logger.Debugf("all chunks downloaded")
 
 	return nil
 }

@@ -183,7 +183,6 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		// Send response or handle context cancellation
 		select {
 		case resCh <- &res:
-			p.logger.Debugf("sent response to encode worker(reqID=%d)", req.ID)
 		case <-ctx.Done():
 			p.logger.Debugf("context done(reqID=%d): %v", req.ID, ctx.Err())
 			return ctx.Err()

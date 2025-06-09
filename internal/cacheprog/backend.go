@@ -99,7 +99,6 @@ func (b *CombinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 }
 
 func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
-	b.logger.Debugf("put: actionID=%s, outputID=%s, size=%d", actionID, outputID, size)
 	requestGauge.Set(1, "put")
 	defer requestGauge.Set(0, "put")
 
@@ -151,7 +150,6 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 }
 
 func (b *CombinedBackend) Close(ctx context.Context) (err error) {
-	b.logger.Debugf("close")
 	requestGauge.Set(1, "close")
 	defer requestGauge.Set(0, "close")
 
@@ -166,6 +164,8 @@ func (b *CombinedBackend) Close(ctx context.Context) (err error) {
 			return
 		}
 	}, "close")
+
+	b.logger.Debugf("closed")
 
 	return err
 }
