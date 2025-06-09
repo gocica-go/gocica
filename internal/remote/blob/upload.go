@@ -190,7 +190,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, 
 			reader      io.ReadSeeker
 			compression v1.Compression
 		)
-		if size > 100*(2^10) {
+		if size > 100*(1<<10) {
 			buf := bytes.NewBuffer(nil)
 			zw := zstd.NewWriterLevel(buf, 1)
 

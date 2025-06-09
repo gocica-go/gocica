@@ -178,9 +178,9 @@ func TestUploader_UploadOutput(t *testing.T) {
 			name:     "success with large size",
 			actionID: "test-action",
 			outputID: "test-output",
-			size:     200 * (2 ^ 10),
+			size:     200 * (1 << 10),
 			setupMock: func(client *mock.MockUploadClient) (io.ReadSeekCloser, error) {
-				data := make([]byte, 200*(2^10))
+				data := make([]byte, 200*(1<<10))
 				client.EXPECT().UploadBlock(gomock.Any(), "test-output", gomock.Cond(func(r io.ReadSeekCloser) bool {
 					buf := bytes.NewBuffer(nil)
 					zw := zstd.NewDecompressWriter(buf)
@@ -201,14 +201,14 @@ func TestUploader_UploadOutput(t *testing.T) {
 			expectOutputs: []*v1.ActionsOutput{
 				{
 					Id:          "test-output",
-					Size:        200 * (2 ^ 10),
+					Size:        200 * (1 << 10),
 					Compression: v1.Compression_COMPRESSION_ZSTD,
 				},
 			},
 			expectHeader: map[string]*v1.IndexEntry{
 				"test-action": {
 					OutputId:   "test-output",
-					Size:       200 * (2 ^ 10),
+					Size:       200 * (1 << 10),
 					Timenano:   time.Now().UnixNano(),
 					LastUsedAt: timestamppb.Now(),
 				},
