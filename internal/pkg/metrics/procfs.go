@@ -25,6 +25,12 @@ func InitProcStat() error {
 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in procfs: %v", r)
+			}
+		}()
+
 		for range ticker.C {
 			err := getCPUAllStat(fs)
 			if err != nil {
