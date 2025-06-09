@@ -1,24 +1,29 @@
 package blob
 
+//go:generate go tool mockgen -source=$GOFILE -destination=mock/${GOFILE} -package=mock
+
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
 
 	"github.com/DataDog/zstd"
+	"github.com/mazrean/gocica/internal/local"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 )
 
 type Downloader struct {
-	logger     log.Logger
-	client     DownloadClient
+	logger log.Logger
+
+	client DownloadClient
+
 	headerSize int64
 	header     *v1.ActionsCache
 }
@@ -29,7 +34,12 @@ type DownloadClient interface {
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
 
-func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
+func NewDownloader(
+	ctx context.Context,
+	logger log.Logger,
+	client DownloadClient,
+	localBackend local.Backend,
+) (*Downloader, error) {
 	downloader := &Downloader{
 		logger: logger,
 		client: client,
@@ -41,7 +51,45 @@ func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
+	outputsWithOpenerMap, err := downloader.createOutputWithOpenerMap(ctx, downloader.header.Outputs, localBackend)
+	if err != nil {
+		return nil, fmt.Errorf("create output with openers: %w", err)
+	}
+
+	// Download all output blocks in the background.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Errorf("panic in download all output blocks: %v", r)
+			}
+		}()
+
+		if err := downloader.DownloadAllOutputBlocks(context.Background(), outputsWithOpenerMap); err != nil {
+			logger.Errorf("download all output blocks: %v", err)
+		}
+	}()
+
 	return downloader, nil
+}
+
+func (d *Downloader) createOutputWithOpenerMap(ctx context.Context, outputs []*v1.ActionsOutput, localBackend local.Backend) (map[string]local.OpenerWithUnlock, error) {
+	outputsWithOpeners := make(map[string]local.OpenerWithUnlock, len(outputs))
+	for _, output := range outputs {
+		if _, ok := outputsWithOpeners[output.Id]; ok {
+			continue
+		}
+
+		_, opener, err := localBackend.Put(ctx, output.Id, output.Size)
+		if err != nil {
+			return nil, fmt.Errorf("put local cache: %w", err)
+		}
+
+		if opener != nil {
+			outputsWithOpeners[output.Id] = opener
+		}
+	}
+
+	return outputsWithOpeners, nil
 }
 
 func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, headerSize int64, err error) {
@@ -67,8 +115,13 @@ func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, h
 	return header, 8 + int64(len(protoBuf)), nil
 }
 
-func (d *Downloader) GetEntries(context.Context) (metadata map[string]*v1.IndexEntry, err error) {
+func (d *Downloader) GetEntries(context.Context) (entries map[string]*v1.IndexEntry, err error) {
 	return d.header.Entries, nil
+}
+
+func (d *Downloader) GetEntry(_ context.Context, actionID string) (metadata *v1.IndexEntry, ok bool, err error) {
+	metadata, ok = d.header.Entries[actionID]
+	return metadata, ok, nil
 }
 
 func (d *Downloader) GetOutputs(context.Context) (outputs []*v1.ActionsOutput, err error) {
@@ -85,11 +138,7 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 
 const maxChunkSize = 4 * (1 << 20)
 
-// openFileLimit is the maximum number of files that can be opened at the same time.
-// ref: https://github.com/golang/go/issues/46279
-const openFileLimit = 100000
-
-func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
+func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpenerMap map[string]local.OpenerWithUnlock) error {
 	outputs := d.header.Outputs
 	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
 		return int(x.Offset - y.Offset)
@@ -97,7 +146,6 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 	eg := errgroup.Group{}
 
-	s := semaphore.NewWeighted(openFileLimit)
 	offset := d.headerSize
 	for i := 0; i < len(outputs); {
 		d.logger.Debugf("creating chunk: %d", i)
@@ -110,18 +158,16 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 			offset += output.Size
 			chunkSize += output.Size
 
-			d.logger.Debugf("acquiring semaphore(%d): outputID=%s", i, output.Id)
-
-			err := s.Acquire(ctx, 1)
-			if err != nil {
-				return fmt.Errorf("acquire semaphore: %w", err)
-			}
-
 			d.logger.Debugf("creating object writer(%d): outputID=%s", i, output.Id)
 
-			w, err := objectWriterFunc(ctx, outputs[i].Id)
+			opener, ok := outputsWithOpenerMap[output.Id]
+			if !ok {
+				return fmt.Errorf("object writer not found: outputID=%s", output.Id)
+			}
+
+			w, err := opener.Open()
 			if err != nil {
-				return fmt.Errorf("get object writer: %w", err)
+				return fmt.Errorf("open object writer: %w", err)
 			}
 			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
 
@@ -144,8 +190,15 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 		slices.Reverse(chunkCloseFuncs)
 		j := i
-		eg.Go(func() error {
-			defer s.Release(int64(len(chunkWriters)))
+		eg.Go(func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					d.logger.Warnf("panic in download all output blocks: %v", r)
+					err = errors.Join(err, fmt.Errorf("panic in download all output blocks: %v", r))
+					return
+				}
+			}()
+
 			defer func() {
 				// io.WriteCloser is expected to be already Closed in JoindWriter.
 				// However, in order to avoid deadlock in the event that an error occurs during the process and Close is not performed, Close is performed by defer without fail.
@@ -159,13 +212,15 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
 			d.logger.Debugf("downloading chunk: %d/%d", j, len(outputs))
-			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
-				return fmt.Errorf("download block: %w", err)
+			err = d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw)
+			if err != nil {
+				err = fmt.Errorf("download block: %w", err)
+				return
 			}
 
 			d.logger.Debugf("downloaded chunk: %d/%d", j, len(outputs))
 
-			return nil
+			return
 		})
 	}
 
@@ -174,6 +229,8 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 	if err := eg.Wait(); err != nil {
 		return err
 	}
+
+	d.logger.Debugf("all chunks downloaded")
 
 	return nil
 }

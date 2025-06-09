@@ -1,13 +1,13 @@
-package backend
+package local
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/mazrean/gocica/internal/config"
 	"github.com/mazrean/gocica/log"
 )
 
@@ -17,7 +17,7 @@ func TestNewDisk(t *testing.T) {
 	tests := []struct {
 		name          string
 		wantErr       bool
-		wantObjectMap map[string]*objectLocker
+		wantObjectMap map[string]<-chan struct{}
 		setup         func(t *testing.T) string
 	}{
 		{
@@ -25,7 +25,7 @@ func TestNewDisk(t *testing.T) {
 			setup: func(t *testing.T) string {
 				return t.TempDir()
 			},
-			wantObjectMap: map[string]*objectLocker{},
+			wantObjectMap: map[string]<-chan struct{}{},
 		},
 		{
 			name:    "error on directory creation",
@@ -43,7 +43,7 @@ func TestNewDisk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := tt.setup(t)
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 
 			if tt.wantErr {
 				if err == nil {
@@ -129,7 +129,7 @@ func TestDisk_Get(t *testing.T) {
 				}
 			}
 
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,13 +138,18 @@ func TestDisk_Get(t *testing.T) {
 
 			if tt.isExist {
 				func() {
-					_, w, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
+					_, opener, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer w.Close()
 
-					if _, err := w.Write(tt.setupData); err != nil {
+					f, err := opener.Open()
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer f.Close()
+
+					if _, err := f.Write(tt.setupData); err != nil {
 						t.Fatal(err)
 					}
 				}()
@@ -214,21 +219,26 @@ func TestDisk_Put(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, &config.Config{Dir: dir})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			var gotPath string
 			func() {
-				var w io.WriteCloser
-				gotPath, w, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
+				var opener OpenerWithUnlock
+				gotPath, opener, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer w.Close()
 
-				if _, err := w.Write(tt.data); err != nil {
+				f, err := opener.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+
+				if _, err := f.Write(tt.data); err != nil {
 					t.Fatal(err)
 				}
 			}()

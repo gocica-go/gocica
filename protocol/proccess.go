@@ -102,7 +102,7 @@ func WithDebugStdinLeakFile(file string) ProcessOption {
 func NewProcess(options ...ProcessOption) *Process {
 	o := &processOption{
 		logger:             log.DefaultLogger,
-		responseBufferSize: 100, // デフォルト値
+		responseBufferSize: 100, // default value
 	}
 	for _, option := range options {
 		option(o)
@@ -149,23 +149,13 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		// Perform cleanup and collect any errors that occur
 		deferErr := p.close(ctx)
 		if deferErr != nil {
-			deferErr = fmt.Errorf("close process: %w", deferErr)
-			if err == nil {
-				err = deferErr
-			} else {
-				err = errors.Join(err, deferErr)
-			}
+			err = errors.Join(err, fmt.Errorf("close process: %w", deferErr))
 		}
 
 		// Wait for encoder goroutine to finish and handle any errors
 		deferErr = eg.Wait()
 		if deferErr != nil {
-			deferErr = fmt.Errorf("wait for encoder: %w", deferErr)
-			if err == nil {
-				err = deferErr
-			} else {
-				err = errors.Join(err, deferErr)
-			}
+			err = errors.Join(err, fmt.Errorf("wait for encoder: %w", deferErr))
 		}
 	}()
 
@@ -175,7 +165,13 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		KnownCommands: p.knownCommands(),
 	}
 	// Start encoder goroutine to handle response writing
-	eg.Go(func() error {
+	eg.Go(func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = errors.Join(err, fmt.Errorf("panic in encode worker: %v", r))
+			}
+		}()
+
 		return p.encodeWorker(w, resCh)
 	})
 
@@ -194,6 +190,7 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		select {
 		case resCh <- &res:
 		case <-ctx.Done():
+			p.logger.Debugf("context done(reqID=%d): %v", req.ID, ctx.Err())
 			return ctx.Err()
 		}
 
@@ -245,6 +242,7 @@ func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
 			continue
 		}
 	}
+	p.logger.Debugf("encode worker finished")
 
 	return nil
 }
@@ -254,14 +252,10 @@ func (p *Process) encodeWorker(w io.Writer, ch <-chan *Response) error {
 func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(context.Context, *Request) error) (err error) {
 	eg, ctx := errgroup.WithContext(ctx)
 	defer func() {
+		p.logger.Debugf("decode worker finished")
 		deferErr := eg.Wait()
 		if deferErr != nil {
-			deferErr = fmt.Errorf("wait for handler: %w", deferErr)
-			if err == nil {
-				err = deferErr
-			} else {
-				err = errors.Join(err, deferErr)
-			}
+			err = errors.Join(err, fmt.Errorf("wait for handler: %w", deferErr))
 		}
 	}()
 
@@ -272,6 +266,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 		err = dr.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				p.logger.Debugf("EOF")
 				return nil
 			}
 			err = fmt.Errorf("next request: %w", err)
@@ -282,6 +277,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 		err = decoder.Decode(&req)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				p.logger.Debugf("EOF")
 				return nil
 			}
 
@@ -295,6 +291,7 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			err = dr.Next()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
+					p.logger.Debugf("EOF")
 					return nil
 				}
 				return fmt.Errorf("next request body: %w", err)
@@ -314,8 +311,21 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			req.Body = myio.NewClonableReadSeeker(buf.Bytes())
 		}
 
-		eg.Go(func() error {
-			return handler(ctx, &req)
+		eg.Go(func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					p.logger.Warnf("panic in handler(%+v): %v", req, r)
+					err = errors.Join(err, fmt.Errorf("panic in handler(%+v): %v", req, r))
+				}
+			}()
+
+			err = handler(ctx, &req)
+			if err != nil {
+				p.logger.Warnf("handle request(%+v): %v", req, err)
+				return
+			}
+
+			return nil
 		})
 	}
 }
