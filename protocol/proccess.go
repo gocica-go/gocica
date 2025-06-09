@@ -305,8 +305,21 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 			req.Body = myio.NewClonableReadSeeker(buf.Bytes())
 		}
 
-		eg.Go(func() error {
-			return handler(ctx, &req)
+		eg.Go(func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					p.logger.Warnf("panic in handler(%+v): %v", req, r)
+					err = errors.Join(err, fmt.Errorf("panic in handler(%+v): %v", req, r))
+				}
+			}()
+
+			err = handler(ctx, &req)
+			if err != nil {
+				p.logger.Warnf("handle request(%+v): %v", req, err)
+				return
+			}
+
+			return nil
 		})
 	}
 }
