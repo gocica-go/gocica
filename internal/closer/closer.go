@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -26,6 +27,12 @@ func Close(ctx context.Context) error {
 
 	for _, f := range closer {
 		eg.Go(func() error {
+			defer func() {
+				if r := recover(); r != nil {
+					log.DefaultLogger.Warnf("panic in closer: %v", r)
+				}
+			}()
+
 			return f(ctx)
 		})
 	}

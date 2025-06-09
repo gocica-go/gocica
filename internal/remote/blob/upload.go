@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -120,27 +121,44 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 		baseBlockIDs   []string
 		baseOutputSize int64
 	)
-	eg.Go(func() error {
+	eg.Go(func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = errors.Join(err, fmt.Errorf("panic in setup base: %v", r))
+				return
+			}
+		}()
+
 		url, offset, size, err := baseBlobProvider.GetOutputBlockURL(ctx)
 		if err != nil {
-			return fmt.Errorf("get output block URL: %w", err)
+			err = fmt.Errorf("get output block URL: %w", err)
+			return err
 		}
 		baseOutputSize = size
 
 		var uploadSize int64
 		for i := int64(0); i < size; i += uploadSize {
-			baseBlockID, err := u.generateBlockID()
+			var baseBlockID string
+			baseBlockID, err = u.generateBlockID()
 			if err != nil {
-				return fmt.Errorf("generate block ID: %w", err)
+				err = fmt.Errorf("generate block ID: %w", err)
+				return err
 			}
 			baseBlockIDs = append(baseBlockIDs, baseBlockID)
 
 			chunkUploadSize := min(maxUploadChunkSize, size-i)
 			uploadSize = chunkUploadSize
-			eg.Go(func() error {
+			eg.Go(func() (err error) {
+				defer func() {
+					if r := recover(); r != nil {
+						err = errors.Join(err, fmt.Errorf("panic in setup base: %v", r))
+						return
+					}
+				}()
 				err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset+i, chunkUploadSize)
 				if err != nil {
-					return fmt.Errorf("upload block from URL: %w", err)
+					err = fmt.Errorf("upload block from URL: %w", err)
+					return err
 				}
 
 				return nil
@@ -151,14 +169,21 @@ func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvi
 	})
 
 	var baseOutputs []*v1.ActionsOutput
-	eg.Go(func() error {
-		var err error
+	eg.Go(func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = errors.Join(err, fmt.Errorf("panic in download outputs: %v", r))
+				return
+			}
+		}()
+
 		baseOutputs, err = baseBlobProvider.GetOutputs(ctx)
 		if err != nil {
-			return fmt.Errorf("download outputs: %w", err)
+			err = fmt.Errorf("download outputs: %w", err)
+			return
 		}
 
-		return nil
+		return
 	})
 
 	return func() ([]string, int64, []*v1.ActionsOutput, error) {

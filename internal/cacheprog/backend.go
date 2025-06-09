@@ -115,9 +115,19 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 			localReader = body.Clone()
 		}
 
-		b.eg.Go(func() error {
-			if err := b.remote.Put(context.Background(), actionID, outputID, size, remoteReader); err != nil {
-				return fmt.Errorf("put remote cache: %w", err)
+		b.eg.Go(func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					b.logger.Warnf("panic in remote put: %v", r)
+					err = fmt.Errorf("panic in remote put: %v", r)
+					return
+				}
+			}()
+
+			err = b.remote.Put(context.Background(), actionID, outputID, size, remoteReader)
+			if err != nil {
+				err = fmt.Errorf("put remote cache: %w", err)
+				return
 			}
 
 			return nil

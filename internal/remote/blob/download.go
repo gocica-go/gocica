@@ -5,6 +5,7 @@ package blob
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -57,6 +58,12 @@ func NewDownloader(
 
 	// Download all output blocks in the background.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Errorf("panic in download all output blocks: %v", r)
+			}
+		}()
+
 		if err := downloader.DownloadAllOutputBlocks(context.Background(), outputsWithOpenerMap); err != nil {
 			logger.Errorf("download all output blocks: %v", err)
 		}
@@ -183,7 +190,15 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 
 		slices.Reverse(chunkCloseFuncs)
 		j := i
-		eg.Go(func() error {
+		eg.Go(func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					d.logger.Warnf("panic in download all output blocks: %v", r)
+					err = errors.Join(err, fmt.Errorf("panic in download all output blocks: %v", r))
+					return
+				}
+			}()
+
 			defer func() {
 				// io.WriteCloser is expected to be already Closed in JoindWriter.
 				// However, in order to avoid deadlock in the event that an error occurs during the process and Close is not performed, Close is performed by defer without fail.
@@ -197,13 +212,15 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
 			d.logger.Debugf("downloading chunk: %d/%d", j, len(outputs))
-			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
-				return fmt.Errorf("download block: %w", err)
+			err = d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw)
+			if err != nil {
+				err = fmt.Errorf("download block: %w", err)
+				return
 			}
 
 			d.logger.Debugf("downloaded chunk: %d/%d", j, len(outputs))
 
-			return nil
+			return
 		})
 	}
 

@@ -165,7 +165,13 @@ func (p *Process) run(w io.Writer, r io.Reader) (err error) {
 		KnownCommands: p.knownCommands(),
 	}
 	// Start encoder goroutine to handle response writing
-	eg.Go(func() error {
+	eg.Go(func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = errors.Join(err, fmt.Errorf("panic in encode worker: %v", r))
+			}
+		}()
+
 		return p.encodeWorker(w, resCh)
 	})
 
