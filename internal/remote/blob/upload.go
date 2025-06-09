@@ -16,7 +16,6 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
@@ -215,7 +214,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, 
 			reader      io.ReadSeeker
 			compression v1.Compression
 		)
-		if size > 100*(1<<10) {
+		/*if size > 100*(1<<10) {
 			buf := bytes.NewBuffer(nil)
 			zw := zstd.NewWriterLevel(buf, 1)
 
@@ -233,10 +232,10 @@ func (u *Uploader) UploadOutput(ctx context.Context, actionID, outputID string, 
 
 			reader = bytes.NewReader(buf.Bytes())
 			compression = v1.Compression_COMPRESSION_ZSTD
-		} else {
-			reader = r
-			compression = v1.Compression_COMPRESSION_UNSPECIFIED
-		}
+		} else {*/
+		reader = r
+		compression = v1.Compression_COMPRESSION_UNSPECIFIED
+		//}
 
 		if size == 0 {
 			uploadSize = 0
