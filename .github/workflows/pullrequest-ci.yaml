@@ -90,6 +90,11 @@ jobs:
         with:
           name: metrics
           path: ./tmp
+      - name: Upload cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache
+          path: /home/runner/.cache/gocica
   test:
     name: Test
     runs-on: ubuntu-latest
