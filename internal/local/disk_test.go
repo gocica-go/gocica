@@ -138,7 +138,7 @@ func TestDisk_Get(t *testing.T) {
 
 			if tt.isExist {
 				func() {
-					_, opener, err := disk.Put(ctx, outputID, int64(len(tt.setupData)))
+					_, opener, err := disk.Put(ctx, outputID)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -227,7 +227,7 @@ func TestDisk_Put(t *testing.T) {
 			var gotPath string
 			func() {
 				var opener OpenerWithUnlock
-				gotPath, opener, err = disk.Put(context.Background(), outputID, int64(len(tt.data)))
+				gotPath, opener, err = disk.Put(context.Background(), outputID)
 				if err != nil {
 					t.Fatal(err)
 				}

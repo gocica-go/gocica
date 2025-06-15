@@ -73,7 +73,7 @@ func (d *Disk) Get(ctx context.Context, outputID string) (diskPath string, err e
 	return d.objectFilePath(outputID), nil
 }
 
-func (d *Disk) Put(ctx context.Context, outputID string, _ int64) (string, OpenerWithUnlock, error) {
+func (d *Disk) Put(ctx context.Context, outputID string) (string, OpenerWithUnlock, error) {
 	var (
 		l       <-chan struct{}
 		newChan chan struct{}

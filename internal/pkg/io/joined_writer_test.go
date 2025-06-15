@@ -148,6 +148,7 @@ func TestJoinedWriter(t *testing.T) {
 				writers = append(writers, WriterWithSize{
 					Writer: writer,
 					Size:   w.size,
+					Close:  writer.Close,
 				})
 			}
 
