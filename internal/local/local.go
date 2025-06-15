@@ -10,7 +10,7 @@ import (
 
 type Backend interface {
 	Get(ctx context.Context, outputID string) (diskPath string, err error)
-	Put(ctx context.Context, outputID string, size int64) (diskPath string, opener OpenerWithUnlock, err error)
+	Put(ctx context.Context, outputID string) (diskPath string, opener OpenerWithUnlock, err error)
 }
 
 type OpenerWithUnlock interface {

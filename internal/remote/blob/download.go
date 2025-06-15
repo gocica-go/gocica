@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/DataDog/zstd"
 	"github.com/mazrean/gocica/internal/local"
@@ -79,7 +80,7 @@ func (d *Downloader) createOutputWithOpenerMap(ctx context.Context, outputs []*v
 			continue
 		}
 
-		_, opener, err := localBackend.Put(ctx, output.Id, output.Size)
+		_, opener, err := localBackend.Put(ctx, output.Id)
 		if err != nil {
 			return nil, fmt.Errorf("put local cache: %w", err)
 		}
@@ -139,10 +140,15 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 const maxChunkSize = 4 * (1 << 20)
 
 func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpenerMap map[string]local.OpenerWithUnlock) error {
+	d.logger.Debugf("downloading all output blocks")
+	defer d.logger.Debugf("downloaded all output blocks")
+
 	outputs := d.header.Outputs
 	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
 		return int(x.Offset - y.Offset)
 	})
+
+	d.logger.Debugf("outputs: %d", len(outputs))
 
 	eg := errgroup.Group{}
 
@@ -165,17 +171,31 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 				return fmt.Errorf("object writer not found: outputID=%s", output.Id)
 			}
 
-			w, err := opener.Open()
+			d.logger.Debugf("opening object writer(%d): outputID=%s", i, output.Id)
+			fw, err := opener.Open()
 			if err != nil {
 				return fmt.Errorf("open object writer: %w", err)
 			}
-			chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
+			d.logger.Debugf("opened object writer(%d): outputID=%s", i, output.Id)
+			var w io.Writer = fw
+			closeFunc := sync.OnceValue(fw.Close)
 
 			switch output.Compression {
 			case v1.Compression_COMPRESSION_ZSTD:
 				d.logger.Debugf("creating decompress writer(%d): outputID=%s", i, output.Id)
-				w = zstd.NewDecompressWriter(w)
-				chunkCloseFuncs = append(chunkCloseFuncs, w.Close)
+				zw := zstd.NewDecompressWriter(fw)
+				w = zw
+				closeFunc = sync.OnceValue(func() error {
+					if err := zw.Close(); err != nil { // decompress writer
+						d.logger.Debugf("close decompress writer: %v", err)
+					}
+
+					if err := fw.Close(); err != nil {
+						d.logger.Debugf("close file writer: %v", err)
+					}
+
+					return nil
+				})
 			case v1.Compression_COMPRESSION_UNSPECIFIED:
 				fallthrough
 			default:
@@ -184,11 +204,12 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 
 			chunkWriters = append(chunkWriters, myio.WriterWithSize{
 				Writer: w,
-				Size:   outputs[i].Size,
+				Size:   output.Size,
+				Close:  closeFunc,
 			})
+			chunkCloseFuncs = append(chunkCloseFuncs, closeFunc)
 		}
 
-		slices.Reverse(chunkCloseFuncs)
 		j := i
 		eg.Go(func() (err error) {
 			defer func() {
@@ -199,15 +220,15 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 				}
 			}()
 
-			defer func() {
-				// io.WriteCloser is expected to be already Closed in JoindWriter.
-				// However, in order to avoid deadlock in the event that an error occurs during the process and Close is not performed, Close is performed by defer without fail.
-				for _, closeFunc := range chunkCloseFuncs {
+			// io.WriteCloser is expected to be already Closed in JoindWriter.
+			// However, in order to avoid deadlock in the event that an error occurs during the process and Close is not performed, Close is performed by defer without fail.
+			for _, closeFunc := range chunkCloseFuncs {
+				defer func() {
 					if err := closeFunc(); err != nil {
 						d.logger.Debugf("close object writer: %v", err)
 					}
-				}
-			}()
+				}()
+			}
 
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
@@ -215,12 +236,12 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, outputsWithOpe
 			err = d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw)
 			if err != nil {
 				err = fmt.Errorf("download block: %w", err)
-				return
+				return err
 			}
 
 			d.logger.Debugf("downloaded chunk: %d/%d", j, len(outputs))
 
-			return
+			return nil
 		})
 	}
 

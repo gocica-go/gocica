@@ -134,7 +134,7 @@ func (b *CombinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		})
 
 		var opener local.OpenerWithUnlock
-		diskPath, opener, err = b.local.Put(ctx, outputID, size)
+		diskPath, opener, err = b.local.Put(ctx, outputID)
 		if err != nil {
 			err = fmt.Errorf("put: %w", err)
 			return
