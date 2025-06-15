@@ -365,6 +365,8 @@ func (u *Uploader) Commit(ctx context.Context) (int64, error) {
 
 	newOutputIDs, outputs, outputSize := u.constructOutputs(baseOutputSize, baseOutputs)
 
+	u.logger.Debugf("commit: newOutputs=%v, outputs=%v, outputSize=%d, entries=%v", len(newOutputIDs), len(outputs), outputSize, len(u.header))
+
 	var headerBuf []byte
 	func() {
 		u.logger.Debugf("create header lock waiting")

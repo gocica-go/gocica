@@ -52,6 +52,8 @@ func NewDownloader(
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
+	logger.Debugf("read header: entries=%d, outputs=%d", len(downloader.header.Entries), len(downloader.header.Outputs))
+
 	outputsWithOpenerMap, err := downloader.createOutputWithOpenerMap(ctx, downloader.header.Outputs, localBackend)
 	if err != nil {
 		return nil, fmt.Errorf("create output with openers: %w", err)
