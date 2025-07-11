@@ -9,7 +9,7 @@ require (
 	github.com/bytedance/sonic v1.13.2
 	github.com/google/go-cmp v0.7.0
 	golang.org/x/oauth2 v0.30.0
-	golang.org/x/sync v0.15.0
+	golang.org/x/sync v0.16.0
 	google.golang.org/protobuf v1.36.6
 )
 
