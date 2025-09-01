@@ -3,7 +3,7 @@ module github.com/mazrean/gocica
 go 1.24.1
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.18.2
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.0
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.1
 	github.com/alecthomas/kong v1.12.1
 	github.com/bytedance/sonic v1.13.2
