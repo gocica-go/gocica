@@ -101,7 +101,7 @@ jobs:
           cache: true
       - run: go test ./... -v -coverprofile=./coverage.txt -race -vet=off
       - name: Upload coverage data
-        uses: codecov/codecov-action@v5.4.3
+        uses: codecov/codecov-action@v5.5.1
         with:
           files: ./coverage.txt
           fail_ci_if_error: true
