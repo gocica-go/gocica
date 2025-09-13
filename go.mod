@@ -3,7 +3,7 @@ module github.com/mazrean/gocica
 go 1.24.1
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.0
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.1
 	github.com/alecthomas/kong v1.12.1
 	github.com/bytedance/sonic v1.13.2
@@ -27,9 +27,9 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	golang.org/x/arch v0.14.0 // indirect
-	golang.org/x/net v0.42.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 )
 
 replace github.com/DataDog/zstd v1.5.6 => github.com/gocica-go/zstd v1.5.6
