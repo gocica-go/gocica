@@ -4,7 +4,7 @@ go 1.24.1
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.19.1
-	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.1
+	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.3
 	github.com/alecthomas/kong v1.12.1
 	github.com/bytedance/sonic v1.13.2
 	github.com/google/go-cmp v0.7.0
