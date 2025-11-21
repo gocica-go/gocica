@@ -57,7 +57,7 @@ jobs:
               })
             }
             console.log("Clear completed")
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -80,7 +80,7 @@ jobs:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -103,7 +103,7 @@ jobs:
       max-parallel: 1
     needs: [cache_gocica_github]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -142,7 +142,7 @@ jobs:
         id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       max-parallel: 1
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
