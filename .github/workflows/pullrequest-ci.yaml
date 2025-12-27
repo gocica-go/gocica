@@ -16,7 +16,7 @@ jobs:
     env:
       GOCACHE: "/tmp/go/cache"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -41,7 +41,7 @@ jobs:
     env:
       GOMODCACHE: /tmp/gocache/mod
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -64,7 +64,7 @@ jobs:
     env:
       GOMODCACHE: /tmp/gocache/mod
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           repository: traPtitech/traQ
           ref: v3.22.0
@@ -94,7 +94,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -117,7 +117,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: golangci-lint
         uses: reviewdog/action-golangci-lint@v2.8
         with:
