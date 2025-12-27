@@ -1,13 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/alecthomas/kong"
-	"github.com/mazrean/gocica/internal"
-	"github.com/mazrean/gocica/internal/backend"
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
@@ -65,40 +64,6 @@ func loadConfig() (*kong.Context, error) {
 	return ctx, nil
 }
 
-func createBackend(logger log.Logger) (backend.Backend, error) {
-	// Initialize backend storage
-	diskBackend, err := backend.NewDisk(logger, CLI.Dir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create backend: %w", err)
-	}
-
-	var remoteBackend backend.RemoteBackend
-	// If GitHub token is not specified, use disk backend only
-	if CLI.Github.Token == "" {
-		return nil, fmt.Errorf("GitHub token is not specified")
-	}
-
-	// Initialize GitHub Actions Cache backend
-	remoteBackend, err = backend.NewGitHubActionsCache(
-		logger,
-		CLI.Github.Token,
-		CLI.Github.CacheURL,
-		CLI.Github.RunnerOS, CLI.Github.Ref, CLI.Github.Sha,
-		diskBackend,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create GitHub Actions Cache backend: %w", err)
-	}
-
-	// Initialize combined backend
-	combinedBackend, err := backend.NewConbinedBackend(logger, diskBackend, remoteBackend)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create combined backend: %w", err)
-	}
-
-	return combinedBackend, nil
-}
-
 func main() {
 	// Load configuration
 	_, err := loadConfig()
@@ -132,27 +97,22 @@ func main() {
 
 	logger.Debugf("configuration: %+v", CLI)
 
-	options := make([]protocol.ProcessOption, 0, 4)
-	options = append(options, protocol.WithLogger(logger))
-
-	// Initialize backend
-	backend, err := createBackend(logger)
+	// Initialize process via DI (FR-002: Context parameter, FR-007: Degraded mode handling)
+	process, err := InitializeProcess(
+		context.Background(),
+		logger,
+		Dir(CLI.Dir),
+		Token(CLI.Github.Token),
+		CacheURL(CLI.Github.CacheURL),
+		RunnerOS(CLI.Github.RunnerOS),
+		Ref(CLI.Github.Ref),
+		Sha(CLI.Github.Sha),
+	)
 	if err != nil {
-		// If backend initialization failed, no cache will be used
-		logger.Warnf("failed to create backend: %v. no cache will be used.", err)
-	} else {
-		// Create application instance
-		app := internal.NewGocica(logger, backend)
-
-		options = append(options,
-			protocol.WithGetHandler(app.Get),
-			protocol.WithPutHandler(app.Put),
-			protocol.WithCloseHandler(app.Close),
-		)
+		// Degraded mode: log warning and continue with no-cache Process
+		logger.Warnf("failed to initialize process: %v. no cache will be used.", err)
+		process = protocol.NewProcess(protocol.WithLogger(logger))
 	}
-
-	// Initialize and run process
-	process := protocol.NewProcess(options...)
 
 	if err := process.Run(); err != nil {
 		panic(fmt.Errorf("unexpected error: failed to run process: %w", err))
