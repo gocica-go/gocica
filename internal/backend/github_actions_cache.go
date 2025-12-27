@@ -39,6 +39,8 @@ type GitHubActionsCache struct {
 	runnerOS, ref, sha string
 }
 
+// NewGitHubActionsCache creates a new GitHub Actions Cache backend.
+// This constructor handles the full initialization including GitHub API calls.
 func NewGitHubActionsCache(
 	logger log.Logger,
 	token string,
@@ -72,6 +74,56 @@ func NewGitHubActionsCache(
 
 	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
 		return nil, fmt.Errorf("setup uploader: %w", err)
+	}
+
+	if c.downloader != nil {
+		// Download all output blocks in the background.
+		go func() {
+			if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
+				_, w, err := localBackend.Put(ctx, objectID, 0)
+				return w, err
+			}); err != nil {
+				logger.Errorf("download all output blocks: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("GitHub Actions cache backend initialized.")
+
+	return c, nil
+}
+
+// NewGitHubActionsCacheWithDeps creates a new GitHub Actions Cache backend with pre-created dependencies.
+// This is a DI-friendly constructor that accepts uploader and downloader as parameters.
+// If uploader or downloader is nil, operations requiring them will be no-ops.
+func NewGitHubActionsCacheWithDeps(
+	logger log.Logger,
+	token string,
+	strBaseURL string,
+	runnerOS, ref, sha string,
+	localBackend LocalBackend,
+	uploader *blob.Uploader,
+	downloader *blob.Downloader,
+) (*GitHubActionsCache, error) {
+	baseURL, err := url.Parse(strBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse base url: %w", err)
+	}
+	baseURL = baseURL.JoinPath(actionsCacheBasePath)
+
+	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: token,
+	}))
+
+	c := &GitHubActionsCache{
+		logger:       logger,
+		githubClient: githubClient,
+		baseURL:      baseURL,
+		runnerOS:     runnerOS,
+		ref:          ref,
+		sha:          sha,
+		uploader:     uploader,
+		downloader:   downloader,
 	}
 
 	if c.downloader != nil {
