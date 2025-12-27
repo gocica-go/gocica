@@ -29,6 +29,8 @@ type DownloadClient interface {
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
 
+// NewDownloader creates a new Downloader with the given client.
+// It reads the header from the remote storage immediately.
 func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
 	downloader := &Downloader{
 		logger: logger,
@@ -42,6 +44,26 @@ func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient
 	}
 
 	return downloader, nil
+}
+
+// NewDownloaderWithClient creates a new Downloader with just the client.
+// This is a DI-friendly constructor that initializes header lazily.
+func NewDownloaderWithClient(client DownloadClient) *Downloader {
+	return &Downloader{
+		client: client,
+	}
+}
+
+// InitHeader initializes the header by reading from the remote storage.
+// This must be called before using GetEntries, GetOutputs, or DownloadAllOutputBlocks.
+func (d *Downloader) InitHeader(ctx context.Context, logger log.Logger) error {
+	d.logger = logger
+	var err error
+	d.header, d.headerSize, err = d.readHeader(ctx)
+	if err != nil {
+		return fmt.Errorf("read header: %w", err)
+	}
+	return nil
 }
 
 func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, headerSize int64, err error) {

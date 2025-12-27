@@ -42,6 +42,7 @@ type BaseBlobProvider interface {
 
 type waitBaseFunc func() (baseBlockIDs []string, baseOutputSize int64, baseOutputs []*v1.ActionsOutput, err error)
 
+// NewUploader creates a new Uploader with the given client and base blob provider.
 func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
 	uploader := &Uploader{
 		logger: logger,
@@ -51,6 +52,23 @@ func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, ba
 	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
 
 	return uploader
+}
+
+// NewUploaderWithClient creates a new Uploader with just the client.
+// This is a DI-friendly constructor. Call InitBase to set up the base provider.
+func NewUploaderWithClient(client UploadClient) *Uploader {
+	return &Uploader{
+		client: client,
+		waitBaseFunc: func() ([]string, int64, []*v1.ActionsOutput, error) {
+			return nil, 0, nil, nil
+		},
+	}
+}
+
+// InitBase initializes the uploader with logger and optional base blob provider.
+func (u *Uploader) InitBase(ctx context.Context, logger log.Logger, baseBlobProvider BaseBlobProvider) {
+	u.logger = logger
+	u.waitBaseFunc = u.setupBase(ctx, baseBlobProvider)
 }
 
 func (u *Uploader) generateBlockID() (string, error) {
