@@ -89,6 +89,7 @@ func main() {
 	case "warn":
 		logger = mylog.NewLogger(mylog.Warn)
 	case "info":
+		// default info level
 	case "debug":
 		logger = mylog.NewLogger(mylog.Debug)
 	default:
@@ -98,8 +99,14 @@ func main() {
 	logger.Debugf("configuration: %+v", CLI)
 
 	// Initialize process via DI (FR-002: Context parameter, FR-007: Degraded mode handling)
+	// Use a cancellable context so we can clean up background goroutines on initialization failure.
+	// The second context parameter is for GitHubActionsCache initialization (kessoku DI limitation).
+	ctx, cancel := context.WithCancel(context.Background())
+	// Defer cancel to ensure cleanup even on panic (idempotent - safe to call multiple times)
+	defer cancel()
+
 	process, err := InitializeProcess(
-		context.Background(),
+		ctx,
 		logger,
 		Dir(CLI.Dir),
 		Token(CLI.Github.Token),

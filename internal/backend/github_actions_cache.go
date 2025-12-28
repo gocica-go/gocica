@@ -41,7 +41,9 @@ type GitHubActionsCache struct {
 
 // NewGitHubActionsCache creates a new GitHub Actions Cache backend.
 // This constructor handles the full initialization including GitHub API calls.
+// The context is used for initialization and can be used for cancellation/timeouts.
 func NewGitHubActionsCache(
+	ctx context.Context,
 	logger log.Logger,
 	token string,
 	strBaseURL string,
@@ -54,7 +56,7 @@ func NewGitHubActionsCache(
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
-	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
+	githubClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: token,
 	}))
 
@@ -67,12 +69,12 @@ func NewGitHubActionsCache(
 		sha:          sha,
 	}
 
-	downloadURL, err := c.setupDownloader(context.Background())
+	downloadURL, err := c.setupDownloader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("setup downloader: %w", err)
 	}
 
-	if err := c.setupUploader(context.Background(), downloadURL); err != nil {
+	if err := c.setupUploader(ctx, downloadURL); err != nil {
 		return nil, fmt.Errorf("setup uploader: %w", err)
 	}
 
@@ -96,7 +98,9 @@ func NewGitHubActionsCache(
 // NewGitHubActionsCacheWithDeps creates a new GitHub Actions Cache backend with pre-created dependencies.
 // This is a DI-friendly constructor that accepts uploader and downloader as parameters.
 // If uploader or downloader is nil, operations requiring them will be no-ops.
+// Context is used for the HTTP client and background goroutine; it can be cancelled to stop background work.
 func NewGitHubActionsCacheWithDeps(
+	ctx context.Context,
 	logger log.Logger,
 	token string,
 	strBaseURL string,
@@ -111,7 +115,7 @@ func NewGitHubActionsCacheWithDeps(
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
-	githubClient := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{
+	githubClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: token,
 	}))
 
@@ -160,11 +164,16 @@ var (
 func (c *GitHubActionsCache) setupDownloader(ctx context.Context) (string, error) {
 	blobKey, restoreKeys := c.blobKey()
 
-	downloadURL, err := c.getDownloadURL(context.Background(), blobKey, restoreKeys)
+	downloadURL, err := c.getDownloadURL(ctx, blobKey, restoreKeys)
 	if err != nil {
-		c.logger.Debugf("get download url: %v", err)
-		c.logger.Infof("cache not found, creating new cache entry")
-		return "", nil
+		// Only treat "cache not found" as a cache miss; propagate other errors
+		// (including context cancellation, auth failures, etc.)
+		if errors.Is(err, errActionsCacheNotFound) {
+			c.logger.Debugf("get download url: %v", err)
+			c.logger.Infof("cache not found, creating new cache entry")
+			return "", nil
+		}
+		return "", fmt.Errorf("get download url: %w", err)
 	}
 
 	downloadClient, err := blockblob.NewClientWithNoCredential(downloadURL, azureConfig)

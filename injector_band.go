@@ -9,40 +9,28 @@ import (
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 	"github.com/mazrean/kessoku"
-	"golang.org/x/sync/errgroup"
 )
 
 func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token Token, cacheURL CacheURL, runnerOS RunnerOS, ref Ref, sha Sha) (*protocol.Process, error) {
-	var (
-		disk               *backend.Disk
-		gitHubActionsCache *backend.GitHubActionsCache
-		conbinedBackend    *backend.ConbinedBackend
-		gocica             *internal.Gocica
-		process            *protocol.Process
-	)
-	eg, ctx := errgroup.WithContext(ctx)
 	var err error
-	disk, err = kessoku.Async(kessoku.Bind[backend.LocalBackend](kessoku.Provide(NewDiskWithDI))).Fn()(logger, dir)
+	disk, err := kessoku.Async(kessoku.Bind[backend.LocalBackend](kessoku.Provide(NewDiskWithDI))).Fn()(logger, dir)
 	if err != nil {
 		var zero *protocol.Process
 		return zero, err
 	}
 	var err0 error
-	gitHubActionsCache, err0 = kessoku.Async(kessoku.Bind[backend.RemoteBackend](kessoku.Provide(NewGitHubActionsCacheWithDI))).Fn()(logger, token, cacheURL, runnerOS, ref, sha, disk)
+	gitHubActionsCache, err0 := kessoku.Async(kessoku.Bind[backend.RemoteBackend](kessoku.Provide(NewGitHubActionsCacheWithDI))).Fn()(ctx, logger, token, cacheURL, runnerOS, ref, sha, disk)
 	if err0 != nil {
 		var zero *protocol.Process
 		return zero, err0
 	}
 	var err1 error
-	conbinedBackend, err1 = kessoku.Async(kessoku.Bind[backend.Backend](kessoku.Provide(backend.NewConbinedBackend))).Fn()(logger, disk, gitHubActionsCache)
+	conbinedBackend, err1 := kessoku.Async(kessoku.Bind[backend.Backend](kessoku.Provide(backend.NewConbinedBackend))).Fn()(ctx, logger, disk, gitHubActionsCache)
 	if err1 != nil {
 		var zero *protocol.Process
 		return zero, err1
 	}
-	gocica = kessoku.Provide(internal.NewGocica).Fn()(logger, conbinedBackend)
-	process = kessoku.Provide(NewProcessWithOptions).Fn()(logger, gocica)
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
+	gocica := kessoku.Provide(internal.NewGocica).Fn()(logger, conbinedBackend)
+	process := kessoku.Provide(NewProcessWithOptions).Fn()(ctx, logger, gocica)
 	return process, nil
 }

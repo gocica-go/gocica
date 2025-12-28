@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/mazrean/gocica/internal"
 	"github.com/mazrean/gocica/internal/backend"
 	"github.com/mazrean/gocica/log"
@@ -26,7 +28,9 @@ func NewDiskWithDI(logger log.Logger, dir Dir) (*backend.Disk, error) {
 }
 
 // NewGitHubActionsCacheWithDI wraps backend.NewGitHubActionsCache to accept named types
+// Context is passed through for proper cancellation/timeout support.
 func NewGitHubActionsCacheWithDI(
+	ctx context.Context,
 	logger log.Logger,
 	token Token,
 	cacheURL CacheURL,
@@ -36,6 +40,7 @@ func NewGitHubActionsCacheWithDI(
 	localBackend backend.LocalBackend,
 ) (*backend.GitHubActionsCache, error) {
 	return backend.NewGitHubActionsCache(
+		ctx,
 		logger,
 		string(token),
 		string(cacheURL),
@@ -48,7 +53,8 @@ func NewGitHubActionsCacheWithDI(
 
 // NewProcessWithOptions creates a new Process with the given logger and Gocica instance.
 // This is a DI-friendly wrapper that constructs ProcessOptions from the dependencies.
-func NewProcessWithOptions(logger log.Logger, gocica *internal.Gocica) *protocol.Process {
+// Context is passed through for proper shutdown coordination.
+func NewProcessWithOptions(ctx context.Context, logger log.Logger, gocica *internal.Gocica) *protocol.Process {
 	return protocol.NewProcess(
 		protocol.WithLogger(logger),
 		protocol.WithGetHandler(gocica.Get),
@@ -71,6 +77,7 @@ var _ = kessoku.Inject[*protocol.Process](
 	kessoku.Async(kessoku.Bind[backend.RemoteBackend](kessoku.Provide(NewGitHubActionsCacheWithDI))),
 
 	// Provider: ConbinedBackend → Backend (interface binding)
+	// Context is passed through for proper cancellation of background operations
 	kessoku.Async(kessoku.Bind[backend.Backend](kessoku.Provide(backend.NewConbinedBackend))),
 
 	// Provider: Gocica

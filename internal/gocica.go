@@ -63,7 +63,7 @@ func (g *Gocica) Close(ctx context.Context) error {
 	g.logger.Infof("cache put count: %d", atomic.LoadUint64(&g.putCount))
 
 	if err := g.backend.Close(ctx); err != nil {
-		g.logger.Warnf("failed to close backend: %v", err)
+		return fmt.Errorf("close backend: %w", err)
 	}
 
 	return nil
