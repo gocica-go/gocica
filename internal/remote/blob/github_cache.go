@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
-	"github.com/mazrean/gocica/internal/metrics"
 	"github.com/mazrean/gocica/internal/pkg/json"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
 )

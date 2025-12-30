@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 
-	"github.com/mazrean/gocica/internal"
-	"github.com/mazrean/gocica/internal/backend"
-	"github.com/mazrean/gocica/internal/backend/blob"
+	"github.com/mazrean/gocica/internal/cacheprog"
+	"github.com/mazrean/gocica/internal/local"
+	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 	"github.com/mazrean/kessoku"
@@ -23,9 +24,9 @@ type (
 	Sha      string // GitHub SHA
 )
 
-// NewDiskWithDI wraps backend.NewDisk to accept named type
-func NewDiskWithDI(logger log.Logger, dir Dir) (*backend.Disk, error) {
-	return backend.NewDisk(logger, string(dir))
+// NewDiskWithDI wraps local.NewDisk to accept named type
+func NewDiskWithDI(logger log.Logger, dir Dir) (*local.Disk, error) {
+	return local.NewDisk(logger, string(dir))
 }
 
 // NewGitHubCacheClientWithDI wraps blob.NewGitHubCacheClient to accept named types.
@@ -52,7 +53,7 @@ func NewGitHubCacheClientWithDI(
 
 // NewProcessWithOptions creates a new Process with the given logger and Gocica instance.
 // This is a DI-friendly wrapper that constructs ProcessOptions from the dependencies.
-func NewProcessWithOptions(logger log.Logger, gocica *internal.Gocica) *protocol.Process {
+func NewProcessWithOptions(logger log.Logger, gocica *cacheprog.CacheProg) *protocol.Process {
 	return protocol.NewProcess(
 		protocol.WithLogger(logger),
 		protocol.WithGetHandler(gocica.Get),
@@ -67,7 +68,7 @@ func NewProcessWithOptions(logger log.Logger, gocica *internal.Gocica) *protocol
 var _ = kessoku.Inject[*protocol.Process](
 	"InitializeProcess",
 	// Provider: Disk → LocalBackend (async for parallel initialization, interface binding)
-	kessoku.Async(kessoku.Bind[backend.LocalBackend](kessoku.Provide(NewDiskWithDI))),
+	kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(NewDiskWithDI))),
 
 	// Provider: GitHubCacheClient (async, creates API client for GitHub Cache)
 	kessoku.Async(kessoku.Provide(NewGitHubCacheClientWithDI)),
@@ -90,14 +91,14 @@ var _ = kessoku.Inject[*protocol.Process](
 
 	// Provider: GitHubActionsCache → RemoteBackend (interface binding)
 	// Depends on LocalBackend, GitHubCacheClient, Uploader, and Downloader
-	kessoku.Async(kessoku.Bind[backend.RemoteBackend](kessoku.Provide(backend.NewGitHubActionsCache))),
+	kessoku.Async(kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewGitHubActionsCache))),
 
 	// Provider: CombinedBackend → Backend (interface binding)
 	// Context is passed through for proper cancellation of background operations
-	kessoku.Async(kessoku.Bind[backend.Backend](kessoku.Provide(backend.NewConbinedBackend))),
+	kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))),
 
 	// Provider: Gocica
-	kessoku.Provide(internal.NewGocica),
+	kessoku.Provide(cacheprog.NewCacheProg),
 
 	// Provider: Process (target)
 	kessoku.Provide(NewProcessWithOptions),

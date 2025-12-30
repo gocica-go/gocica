@@ -1,17 +1,18 @@
-package backend
+package remote
 
 import (
 	"context"
 	"fmt"
 	"io"
 
-	"github.com/mazrean/gocica/internal/backend/blob"
+	"github.com/mazrean/gocica/internal/local"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 )
 
-var _ RemoteBackend = &GitHubActionsCache{}
+var _ Backend = &GitHubActionsCache{}
 
 // GitHubActionsCache implements RemoteBackend using GitHub Actions Cache API.
 // It uses GitHubCacheClient for API calls and blob.Uploader/Downloader for data transfer.
@@ -29,7 +30,7 @@ func NewGitHubActionsCache(
 	_ context.Context,
 	logger log.Logger,
 	cacheClient *blob.GitHubCacheClient,
-	localBackend LocalBackend,
+	localBackend local.Backend,
 	uploader *blob.Uploader,
 	downloader *blob.Downloader,
 ) (*GitHubActionsCache, error) {

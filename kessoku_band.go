@@ -4,9 +4,10 @@ package main
 
 import (
 	"context"
-	"github.com/mazrean/gocica/internal"
-	"github.com/mazrean/gocica/internal/backend"
-	"github.com/mazrean/gocica/internal/backend/blob"
+	"github.com/mazrean/gocica/internal/cacheprog"
+	"github.com/mazrean/gocica/internal/local"
+	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 	"github.com/mazrean/kessoku"
@@ -15,7 +16,7 @@ import (
 
 func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token Token, cacheURL CacheURL, runnerOS RunnerOS, ref Ref, sha Sha) (*protocol.Process, error) {
 	var (
-		disk                 *backend.Disk
+		disk                 *local.Disk
 		diskCh               = make(chan struct{})
 		gitHubCacheClient    *blob.GitHubCacheClient
 		gitHubCacheClientCh  = make(chan struct{})
@@ -25,10 +26,10 @@ func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token To
 		downloaderCh         = make(chan struct{})
 		uploader             *blob.Uploader
 		uploaderCh           = make(chan struct{})
-		gitHubActionsCache   *backend.GitHubActionsCache
+		gitHubActionsCache   *remote.GitHubActionsCache
 		gitHubActionsCacheCh = make(chan struct{})
-		conbinedBackend      *backend.ConbinedBackend
-		gocica               *internal.Gocica
+		conbinedBackend      *cacheprog.ConbinedBackend
+		cacheProg            *cacheprog.CacheProg
 		process              *protocol.Process
 	)
 	eg, ctx := errgroup.WithContext(ctx)
@@ -81,7 +82,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token To
 			}
 		}
 		var err3 error
-		gitHubActionsCache, err3 = kessoku.Async(kessoku.Bind[backend.RemoteBackend](kessoku.Provide(backend.NewGitHubActionsCache))).Fn()(ctx, logger, gitHubCacheClient, disk, uploader, downloader)
+		gitHubActionsCache, err3 = kessoku.Async(kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewGitHubActionsCache))).Fn()(ctx, logger, gitHubCacheClient, disk, uploader, downloader)
 		if err3 != nil {
 			return err3
 		}
@@ -97,16 +98,16 @@ func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token To
 			}
 		}
 		var err4 error
-		conbinedBackend, err4 = kessoku.Async(kessoku.Bind[backend.Backend](kessoku.Provide(backend.NewConbinedBackend))).Fn()(logger, disk, gitHubActionsCache)
+		conbinedBackend, err4 = kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))).Fn()(logger, disk, gitHubActionsCache)
 		if err4 != nil {
 			return err4
 		}
-		gocica = kessoku.Provide(internal.NewGocica).Fn()(logger, conbinedBackend)
-		process = kessoku.Provide(NewProcessWithOptions).Fn()(logger, gocica)
+		cacheProg = kessoku.Provide(cacheprog.NewCacheProg).Fn()(logger, conbinedBackend)
+		process = kessoku.Provide(NewProcessWithOptions).Fn()(logger, cacheProg)
 		return nil
 	})
 	var err5 error
-	disk, err5 = kessoku.Async(kessoku.Bind[backend.LocalBackend](kessoku.Provide(NewDiskWithDI))).Fn()(logger, dir)
+	disk, err5 = kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(NewDiskWithDI))).Fn()(logger, dir)
 	if err5 != nil {
 		var zero *protocol.Process
 		return zero, err5

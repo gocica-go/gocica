@@ -8,8 +8,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
-	"github.com/mazrean/gocica/internal/metrics"
 	"github.com/mazrean/gocica/internal/pkg/http"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
 )
 
 var _ UploadClient = (*AzureUploadClient)(nil)

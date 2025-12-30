@@ -1,4 +1,4 @@
-package backend
+package local
 
 import (
 	"context"
@@ -7,12 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/mazrean/gocica/log"
 )
 
-var _ LocalBackend = &Disk{}
+var _ Backend = &Disk{}
 
 type Disk struct {
 	logger   log.Logger
@@ -122,4 +123,8 @@ func (d *Disk) objectFilePath(id string) string {
 
 func (d *Disk) Close(context.Context) error {
 	return nil
+}
+
+func encodeID(id string) string {
+	return strings.ReplaceAll(id, "/", "-")
 }
