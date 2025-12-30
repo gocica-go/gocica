@@ -55,7 +55,7 @@ func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, ba
 		client: client,
 	}
 
-	uploader.waitBaseFunc = uploader.setupBase(ctx, baseBlobProvider)
+	uploader.waitBaseFunc = uploader.setupBase(baseBlobProvider)
 
 	return uploader
 }
@@ -70,14 +70,14 @@ func (u *Uploader) generateBlockID() (string, error) {
 
 const maxUploadChunkSize = 4 * (1 << 20)
 
-func (u *Uploader) setupBase(ctx context.Context, baseBlobProvider BaseBlobProvider) waitBaseFunc {
+func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	if baseBlobProvider == nil {
 		return func() ([]string, int64, []*v1.ActionsOutput, error) {
 			return nil, 0, nil, nil
 		}
 	}
 
-	eg, ctx := errgroup.WithContext(ctx)
+	eg, ctx := errgroup.WithContext(context.Background())
 
 	var (
 		baseBlockIDs   []string
