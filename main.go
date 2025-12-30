@@ -10,7 +10,7 @@ import (
 	"github.com/mazrean/gocica/internal/kessoku"
 	"github.com/mazrean/gocica/internal/local"
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
-	"github.com/mazrean/gocica/internal/remote/blob"
+	"github.com/mazrean/gocica/internal/remote/provider"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 )
@@ -112,11 +112,13 @@ func main() {
 		ctx,
 		logger,
 		local.DiskDir(CLI.Dir),
-		blob.GitHubAccessToken(CLI.Github.Token),
-		blob.GitHubActionsCacheURL(CLI.Github.CacheURL),
-		blob.GitHubActionsRunnerOS(CLI.Github.RunnerOS),
-		blob.GitHubRef(CLI.Github.Ref),
-		blob.GitHubSHA(CLI.Github.Sha),
+		&provider.GHACacheConfig{
+			Token:    CLI.Github.Token,
+			CacheURL: CLI.Github.CacheURL,
+			RunnerOS: CLI.Github.RunnerOS,
+			Ref:      CLI.Github.Ref,
+			Sha:      CLI.Github.Sha,
+		},
 	)
 	if err != nil {
 		// Degraded mode: log warning and continue with no-cache Process
