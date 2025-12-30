@@ -54,12 +54,6 @@ func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, ba
 	return uploader
 }
 
-// InitBase initializes the uploader with logger and optional base blob provider.
-func (u *Uploader) InitBase(ctx context.Context, logger log.Logger, baseBlobProvider BaseBlobProvider) {
-	u.logger = logger
-	u.waitBaseFunc = u.setupBase(ctx, baseBlobProvider)
-}
-
 func (u *Uploader) generateBlockID() (string, error) {
 	var buf [32]byte
 	if _, err := rand.Read(buf[:]); err != nil {

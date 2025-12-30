@@ -74,6 +74,8 @@ func NewGitHubActionsCache(
 				return fmt.Errorf("get download url: %w", err)
 			}
 			logger.Infof("no existing cache found, proceeding without downloader")
+
+			return nil
 		}
 
 		storageDownloadClient, err := storage.NewAzureDownloadClient(downloadURL)
@@ -89,20 +91,28 @@ func NewGitHubActionsCache(
 		return nil
 	})
 
+	var storageUploadClient *storage.AzureUploadClient
 	uploadURL, err := cacheClient.createCacheEntry(ctx)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrAlreadyExists):
+		logger.Infof("cache entry already exists, proceeding with uploader")
+	case err != nil:
 		return nil, fmt.Errorf("create cache entry: %w", err)
-	}
-	storageUploadClient, err := storage.NewAzureUploadClient(uploadURL)
-	if err != nil {
-		return nil, fmt.Errorf("create azure upload client: %w", err)
+	default:
+		storageUploadClient, err = storage.NewAzureUploadClient(uploadURL)
+		if err != nil {
+			return nil, fmt.Errorf("create azure upload client: %w", err)
+		}
 	}
 
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
 
-	uploader := remote.NewUploader(ctx, logger, storageUploadClient, downloader)
+	var uploader *remote.Uploader
+	if storageUploadClient != nil {
+		uploader = remote.NewUploader(ctx, logger, storageUploadClient, downloader)
+	}
 
 	c := &GitHubActionsCache{
 		logger:     logger,
