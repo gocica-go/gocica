@@ -32,6 +32,10 @@ type DownloadClient interface {
 // NewDownloader creates a new Downloader with the given client.
 // It reads the header from the remote storage immediately.
 func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
+	if client == nil {
+		return nil, nil
+	}
+
 	downloader := &Downloader{
 		logger: logger,
 		client: client,
@@ -44,14 +48,6 @@ func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient
 	}
 
 	return downloader, nil
-}
-
-// NewDownloaderWithClient creates a new Downloader with just the client.
-// This is a DI-friendly constructor that initializes header lazily.
-func NewDownloaderWithClient(client DownloadClient) *Downloader {
-	return &Downloader{
-		client: client,
-	}
 }
 
 // InitHeader initializes the header by reading from the remote storage.

@@ -5,13 +5,21 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/mazrean/gocica/internal/metrics"
+	"github.com/mazrean/gocica/internal/pkg/http"
 )
 
 var _ UploadClient = (*AzureUploadClient)(nil)
 var latencyGauge = metrics.NewGauge("azure_blob_storage_latency")
+
+var azureConfig = &blockblob.ClientOptions{
+	ClientOptions: azcore.ClientOptions{
+		Transport: http.NewClient(),
+	},
+}
 
 type AzureUploadClient struct {
 	client *blockblob.Client

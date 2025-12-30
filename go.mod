@@ -25,7 +25,7 @@ require (
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/google/pprof v0.0.0-20240227163752-401108e1b7e7 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/mazrean/kessoku v1.0.1-0.20251227101701-57a93a404891 // indirect
+	github.com/mazrean/kessoku v1.0.1-0.20251228025041-cb56d3314c27 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	golang.org/x/arch v0.14.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
