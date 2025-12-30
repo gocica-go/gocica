@@ -4,7 +4,7 @@ import (
 	"github.com/mazrean/gocica/internal/cacheprog"
 	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/remote"
-	"github.com/mazrean/gocica/internal/remote/blob"
+	"github.com/mazrean/gocica/internal/remote/provider"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 	"github.com/mazrean/kessoku"
@@ -31,28 +31,9 @@ var _ = kessoku.Inject[*protocol.Process](
 	// Provider: Disk → LocalBackend (async for parallel initialization, interface binding)
 	kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))),
 
-	// Provider: GitHubCacheClient (async, creates API client for GitHub Cache)
-	kessoku.Async(kessoku.Provide(blob.NewGitHubCacheClient)),
-
-	// Provider: DownloadClient (async, creates Azure blob client for downloading)
-	// Returns nil if download URL is empty
-	kessoku.Async(kessoku.Provide(blob.NewDownloadClient)),
-
-	// Provider: Downloader (async, creates blob downloader)
-	// Returns nil if download client is nil
-	kessoku.Async(kessoku.Provide(blob.NewDownloader)),
-
-	// Provider: UploadClient (async, creates Azure blob client for uploading)
-	// Returns nil if upload URL is empty
-	kessoku.Async(kessoku.Provide(blob.NewUploadClient)),
-
-	// Provider: Uploader (creates blob uploader)
-	// Returns nil if upload client is nil
-	kessoku.Provide(blob.NewUploaderOrNil),
-
 	// Provider: GitHubActionsCache → RemoteBackend (interface binding)
 	// Depends on LocalBackend, GitHubCacheClient, Uploader, and Downloader
-	kessoku.Async(kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewGitHubActionsCache))),
+	kessoku.Async(kessoku.Bind[remote.Backend](kessoku.Provide(provider.NewGitHubActionsCache))),
 
 	// Provider: CombinedBackend → Backend (interface binding)
 	// Context is passed through for proper cancellation of background operations
