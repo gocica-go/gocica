@@ -8,7 +8,9 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/mazrean/gocica/internal/kessoku"
+	"github.com/mazrean/gocica/internal/local"
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
+	"github.com/mazrean/gocica/internal/remote/blob"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 )
@@ -109,12 +111,12 @@ func main() {
 	process, err := kessoku.InitializeProcess(
 		ctx,
 		logger,
-		kessoku.Dir(CLI.Dir),
-		kessoku.Token(CLI.Github.Token),
-		kessoku.CacheURL(CLI.Github.CacheURL),
-		kessoku.RunnerOS(CLI.Github.RunnerOS),
-		kessoku.Ref(CLI.Github.Ref),
-		kessoku.Sha(CLI.Github.Sha),
+		local.DiskDir(CLI.Dir),
+		blob.GitHubAccessToken(CLI.Github.Token),
+		blob.GitHubActionsCacheURL(CLI.Github.CacheURL),
+		blob.GitHubActionsRunnerOS(CLI.Github.RunnerOS),
+		blob.GitHubRef(CLI.Github.Ref),
+		blob.GitHubSHA(CLI.Github.Sha),
 	)
 	if err != nil {
 		// Degraded mode: log warning and continue with no-cache Process

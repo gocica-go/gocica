@@ -13,6 +13,8 @@ import (
 	"github.com/mazrean/gocica/log"
 )
 
+type DiskDir string
+
 var _ Backend = &Disk{}
 
 type Disk struct {
@@ -23,8 +25,10 @@ type Disk struct {
 	objectMap       map[string]*objectLocker
 }
 
-func NewDisk(logger log.Logger, dir string) (*Disk, error) {
-	err := os.MkdirAll(dir, 0755)
+func NewDisk(logger log.Logger, dir DiskDir) (*Disk, error) {
+	strDir := string(dir)
+
+	err := os.MkdirAll(strDir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("create root directory: %w", err)
 	}
@@ -33,7 +37,7 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 
 	disk := &Disk{
 		logger:    logger,
-		rootPath:  dir,
+		rootPath:  strDir,
 		objectMap: map[string]*objectLocker{},
 	}
 

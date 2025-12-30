@@ -18,24 +18,24 @@ func TestNewDisk(t *testing.T) {
 		name          string
 		wantErr       bool
 		wantObjectMap map[string]*objectLocker
-		setup         func(t *testing.T) string
+		setup         func(t *testing.T) DiskDir
 	}{
 		{
 			name: "normal mode initialization",
-			setup: func(t *testing.T) string {
-				return t.TempDir()
+			setup: func(t *testing.T) DiskDir {
+				return DiskDir(t.TempDir())
 			},
 			wantObjectMap: map[string]*objectLocker{},
 		},
 		{
 			name:    "error on directory creation",
 			wantErr: true,
-			setup: func(t *testing.T) string {
+			setup: func(t *testing.T) DiskDir {
 				dir := t.TempDir()
 				if err := os.Chmod(dir, 0500); err != nil {
 					t.Fatal(err)
 				}
-				return filepath.Join(dir, "subdir")
+				return DiskDir(filepath.Join(dir, "subdir"))
 			},
 		},
 	}
@@ -129,7 +129,7 @@ func TestDisk_Get(t *testing.T) {
 				}
 			}
 
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, DiskDir(dir))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +214,7 @@ func TestDisk_Put(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, DiskDir(dir))
 			if err != nil {
 				t.Fatal(err)
 			}

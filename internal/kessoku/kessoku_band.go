@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token Token, cacheURL CacheURL, runnerOS RunnerOS, ref Ref, sha Sha) (*protocol.Process, error) {
+func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.DiskDir, gitHubAccessToken blob.GitHubAccessToken, gitHubActionsCacheURL blob.GitHubActionsCacheURL, gitHubActionsRunnerOS blob.GitHubActionsRunnerOS, gitHubRef blob.GitHubRef, gitHubSHA blob.GitHubSHA) (*protocol.Process, error) {
 	var (
 		disk                 *local.Disk
 		diskCh               = make(chan struct{})
@@ -35,7 +35,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token To
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		var err error
-		gitHubCacheClient, err = kessoku.Async(kessoku.Provide(NewGitHubCacheClientWithDI)).Fn()(ctx, logger, token, cacheURL, runnerOS, ref, sha)
+		gitHubCacheClient, err = kessoku.Async(kessoku.Provide(blob.NewGitHubCacheClient)).Fn()(ctx, logger, gitHubAccessToken, gitHubActionsCacheURL, gitHubActionsRunnerOS, gitHubRef, gitHubSHA)
 		if err != nil {
 			return err
 		}
@@ -107,7 +107,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, dir Dir, token To
 		return nil
 	})
 	var err5 error
-	disk, err5 = kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(NewDiskWithDI))).Fn()(logger, dir)
+	disk, err5 = kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))).Fn()(logger, diskDir)
 	if err5 != nil {
 		var zero *protocol.Process
 		return zero, err5

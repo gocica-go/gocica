@@ -18,6 +18,14 @@ import (
 	"golang.org/x/oauth2"
 )
 
+type (
+	GitHubAccessToken     string
+	GitHubActionsCacheURL string
+	GitHubActionsRunnerOS string
+	GitHubRef             string
+	GitHubSHA             string
+)
+
 const (
 	actionsCacheBasePath  = "/twirp/github.actions.results.api.v1.CacheService/"
 	actionsCachePrefix    = "gocica-cache"
@@ -51,27 +59,29 @@ type GitHubCacheClient struct {
 func NewGitHubCacheClient(
 	ctx context.Context,
 	logger log.Logger,
-	token string,
-	strBaseURL string,
-	runnerOS, ref, sha string,
+	token GitHubAccessToken,
+	strBaseURL GitHubActionsCacheURL,
+	runnerOS GitHubActionsRunnerOS,
+	ref GitHubRef,
+	sha GitHubSHA,
 ) (*GitHubCacheClient, error) {
-	baseURL, err := url.Parse(strBaseURL)
+	baseURL, err := url.Parse(string(strBaseURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
-		AccessToken: token,
+		AccessToken: string(token),
 	}))
 
 	return &GitHubCacheClient{
 		logger:     logger,
 		httpClient: httpClient,
 		baseURL:    baseURL,
-		runnerOS:   runnerOS,
-		ref:        ref,
-		sha:        sha,
+		runnerOS:   string(runnerOS),
+		ref:        string(ref),
+		sha:        string(sha),
 	}, nil
 }
 

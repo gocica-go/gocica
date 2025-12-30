@@ -1,8 +1,6 @@
 package kessoku
 
 import (
-	"context"
-
 	"github.com/mazrean/gocica/internal/cacheprog"
 	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/remote"
@@ -13,43 +11,6 @@ import (
 )
 
 //go:generate go tool github.com/mazrean/kessoku/cmd/kessoku $GOFILE
-
-// Named types for config values to distinguish them in DI
-type (
-	Dir      string // cache directory path
-	Token    string // GitHub token
-	CacheURL string // Actions cache URL
-	RunnerOS string // runner OS
-	Ref      string // GitHub ref
-	Sha      string // GitHub SHA
-)
-
-// NewDiskWithDI wraps local.NewDisk to accept named type
-func NewDiskWithDI(logger log.Logger, dir Dir) (*local.Disk, error) {
-	return local.NewDisk(logger, string(dir))
-}
-
-// NewGitHubCacheClientWithDI wraps blob.NewGitHubCacheClient to accept named types.
-// This creates the GitHub Cache API client for downloading and uploading cache.
-func NewGitHubCacheClientWithDI(
-	ctx context.Context,
-	logger log.Logger,
-	token Token,
-	cacheURL CacheURL,
-	runnerOS RunnerOS,
-	ref Ref,
-	sha Sha,
-) (*blob.GitHubCacheClient, error) {
-	return blob.NewGitHubCacheClient(
-		ctx,
-		logger,
-		string(token),
-		string(cacheURL),
-		string(runnerOS),
-		string(ref),
-		string(sha),
-	)
-}
 
 // NewProcessWithOptions creates a new Process with the given logger and Gocica instance.
 // This is a DI-friendly wrapper that constructs ProcessOptions from the dependencies.
@@ -68,10 +29,10 @@ func NewProcessWithOptions(logger log.Logger, gocica *cacheprog.CacheProg) *prot
 var _ = kessoku.Inject[*protocol.Process](
 	"InitializeProcess",
 	// Provider: Disk → LocalBackend (async for parallel initialization, interface binding)
-	kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(NewDiskWithDI))),
+	kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))),
 
 	// Provider: GitHubCacheClient (async, creates API client for GitHub Cache)
-	kessoku.Async(kessoku.Provide(NewGitHubCacheClientWithDI)),
+	kessoku.Async(kessoku.Provide(blob.NewGitHubCacheClient)),
 
 	// Provider: DownloadClient (async, creates Azure blob client for downloading)
 	// Returns nil if download URL is empty
