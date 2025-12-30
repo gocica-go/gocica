@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/alecthomas/kong"
+	"github.com/mazrean/gocica/internal/kessoku"
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
@@ -105,15 +106,15 @@ func main() {
 	// Defer cancel to ensure cleanup even on panic (idempotent - safe to call multiple times)
 	defer cancel()
 
-	process, err := InitializeProcess(
+	process, err := kessoku.InitializeProcess(
 		ctx,
 		logger,
-		Dir(CLI.Dir),
-		Token(CLI.Github.Token),
-		CacheURL(CLI.Github.CacheURL),
-		RunnerOS(CLI.Github.RunnerOS),
-		Ref(CLI.Github.Ref),
-		Sha(CLI.Github.Sha),
+		kessoku.Dir(CLI.Dir),
+		kessoku.Token(CLI.Github.Token),
+		kessoku.CacheURL(CLI.Github.CacheURL),
+		kessoku.RunnerOS(CLI.Github.RunnerOS),
+		kessoku.Ref(CLI.Github.Ref),
+		kessoku.Sha(CLI.Github.Sha),
 	)
 	if err != nil {
 		// Degraded mode: log warning and continue with no-cache Process

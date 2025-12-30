@@ -1,4 +1,4 @@
-package main
+package kessoku
 
 import (
 	"context"
