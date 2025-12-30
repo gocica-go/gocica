@@ -222,23 +222,23 @@ func newGitHubCacheClient(
 	runnerOS string,
 	ref, sha string,
 ) (*GHACacheClient, error) {
-	baseURL, err := url.Parse(string(strBaseURL))
+	baseURL, err := url.Parse(strBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
-		AccessToken: string(token),
+		AccessToken: token,
 	}))
 
 	return &GHACacheClient{
 		logger:     logger,
 		httpClient: httpClient,
 		baseURL:    baseURL,
-		runnerOS:   string(runnerOS),
-		ref:        string(ref),
-		sha:        string(sha),
+		runnerOS:   runnerOS,
+		ref:        ref,
+		sha:        sha,
 	}, nil
 }
 
