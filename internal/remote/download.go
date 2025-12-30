@@ -23,6 +23,7 @@ type Downloader struct {
 	header     *v1.ActionsCache
 }
 
+// DownloadClient defines the interface for downloading blocks from remote storage.
 type DownloadClient interface {
 	GetURL(ctx context.Context) string
 	DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error

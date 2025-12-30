@@ -11,28 +11,112 @@ import (
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
 	"github.com/mazrean/kessoku"
+	"golang.org/x/sync/errgroup"
 )
 
 func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.DiskDir, ghacacheConfig *provider.GHACacheConfig) (*protocol.Process, error) {
-	var err error
-	disk, err := kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))).Fn()(logger, diskDir)
-	if err != nil {
+	var (
+		disk                     *local.Disk
+		diskCh                   = make(chan struct{})
+		downloadClientProvider   provider.DownloadClientProvider
+		downloadClientProviderCh = make(chan struct{})
+		uploadClientProvider     provider.UploadClientProvider
+		uploadClient             remote.UploadClient
+		uploadClientCh           = make(chan struct{})
+		downloadClient           remote.DownloadClient
+		downloader               *remote.Downloader
+		downloaderCh             = make(chan struct{})
+		uploader                 *remote.Uploader
+		backendImpl              *remote.BackendImpl
+		backendImplCh            = make(chan struct{})
+		conbinedBackend          *cacheprog.ConbinedBackend
+		cacheProg                *cacheprog.CacheProg
+		process                  *protocol.Process
+	)
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		select {
+		case <-downloadClientProviderCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		var err error
+		downloadClient, err = kessoku.Async(kessoku.Provide(provider.DownloadClientProviderExecutor)).Fn()(ctx, downloadClientProvider)
+		if err != nil {
+			return err
+		}
+		var err0 error
+		downloader, err0 = kessoku.Async(kessoku.Bind[remote.BaseBlobProvider](kessoku.Provide(remote.NewDownloader))).Fn()(ctx, logger, downloadClient)
+		if err0 != nil {
+			return err0
+		}
+		close(downloaderCh)
+		return nil
+	})
+	eg.Go(func() error {
+		for _, ch := range []<-chan struct{}{uploadClientCh, downloaderCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		uploader = kessoku.Async(kessoku.Provide(remote.NewUploader)).Fn()(ctx, logger, uploadClient, downloader)
+		for _, ch := range []<-chan struct{}{diskCh, downloaderCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		var err1 error
+		backendImpl, err1 = kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewBackend)).Fn()(ctx, logger, disk, uploader, downloader)
+		if err1 != nil {
+			return err1
+		}
+		close(backendImplCh)
+		return nil
+	})
+	eg.Go(func() error {
+		for _, ch := range []<-chan struct{}{diskCh, backendImplCh} {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		var err2 error
+		conbinedBackend, err2 = kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))).Fn()(logger, disk, backendImpl)
+		if err2 != nil {
+			return err2
+		}
+		cacheProg = kessoku.Provide(cacheprog.NewCacheProg).Fn()(logger, conbinedBackend)
+		process = kessoku.Provide(NewProcessWithOptions).Fn()(logger, cacheProg)
+		return nil
+	})
+	var err3 error
+	disk, err3 = kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))).Fn()(logger, diskDir)
+	if err3 != nil {
 		var zero *protocol.Process
-		return zero, err
+		return zero, err3
 	}
-	var err0 error
-	gitHubActionsCache, err0 := kessoku.Async(kessoku.Bind[remote.Backend](kessoku.Provide(provider.NewGitHubActionsCache))).Fn()(ctx, logger, ghacacheConfig, disk)
-	if err0 != nil {
+	close(diskCh)
+	var err4 error
+	downloadClientProvider, uploadClientProvider, err4 = kessoku.Provide(provider.ProviderSwitch).Fn()(ctx, logger, ghacacheConfig)
+	if err4 != nil {
 		var zero *protocol.Process
-		return zero, err0
+		return zero, err4
 	}
-	var err1 error
-	conbinedBackend, err1 := kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))).Fn()(logger, disk, gitHubActionsCache)
-	if err1 != nil {
+	close(downloadClientProviderCh)
+	var err5 error
+	uploadClient, err5 = kessoku.Async(kessoku.Provide(provider.UploadClientProviderExecutor)).Fn()(ctx, uploadClientProvider)
+	if err5 != nil {
 		var zero *protocol.Process
-		return zero, err1
+		return zero, err5
 	}
-	cacheProg := kessoku.Provide(cacheprog.NewCacheProg).Fn()(logger, conbinedBackend)
-	process := kessoku.Provide(NewProcessWithOptions).Fn()(logger, cacheProg)
+	close(uploadClientCh)
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
 	return process, nil
 }

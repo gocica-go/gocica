@@ -29,10 +29,11 @@ type Uploader struct {
 	waitBaseFunc  waitBaseFunc
 }
 
+// UploadClient defines the interface for uploading blocks to remote storage.
 type UploadClient interface {
 	UploadBlock(ctx context.Context, blockID string, r io.ReadSeekCloser) (int64, error)
 	UploadBlockFromURL(ctx context.Context, blockID string, url string, offset, size int64) error
-	Commit(ctx context.Context, blockIDs []string) error
+	Commit(ctx context.Context, blockIDs []string, size int64) error
 }
 
 type BaseBlobProvider interface {
@@ -44,6 +45,10 @@ type waitBaseFunc func() (baseBlockIDs []string, baseOutputSize int64, baseOutpu
 
 // NewUploader creates a new Uploader with the given client and base blob provider.
 func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
+	if client == nil {
+		return nil
+	}
+
 	uploader := &Uploader{
 		logger: logger,
 		client: client,
@@ -229,7 +234,7 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1
 	return buf, nil
 }
 
-func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) (int64, error) {
+func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) error {
 	baseBlockIDs, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
 	if err != nil {
 		u.logger.Warnf("failed to upload base: %v", err)
@@ -242,27 +247,27 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 
 	headerBuf, err := u.createHeader(entries, outputs, outputSize)
 	if err != nil {
-		return 0, fmt.Errorf("create header: %w", err)
+		return fmt.Errorf("create header: %w", err)
 	}
 
 	headerBlockID, err := u.generateBlockID()
 	if err != nil {
-		return 0, fmt.Errorf("generate header block ID: %w", err)
+		return fmt.Errorf("generate header block ID: %w", err)
 	}
 
 	_, err = u.client.UploadBlock(ctx, headerBlockID, myio.NopSeekCloser(bytes.NewReader(headerBuf)))
 	if err != nil {
-		return 0, fmt.Errorf("upload header: %w", err)
+		return fmt.Errorf("upload header: %w", err)
 	}
 
 	blockIDs := make([]string, 0, len(newOutputIDs)+2)
 	blockIDs = append(blockIDs, headerBlockID)
 	blockIDs = append(blockIDs, baseBlockIDs...)
 	blockIDs = append(blockIDs, newOutputIDs...)
-	err = u.client.Commit(ctx, blockIDs)
+	err = u.client.Commit(ctx, blockIDs, int64(len(headerBuf))+outputSize)
 	if err != nil {
-		return 0, fmt.Errorf("commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 
-	return int64(len(headerBuf)) + outputSize, nil
+	return nil
 }

@@ -11,16 +11,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/mazrean/gocica/internal/local"
-	myio "github.com/mazrean/gocica/internal/pkg/io"
 	"github.com/mazrean/gocica/internal/pkg/json"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
-	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/internal/remote/storage"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
-	"golang.org/x/sync/errgroup"
 )
 
 type GHACacheConfig struct {
@@ -31,26 +27,11 @@ type GHACacheConfig struct {
 	Sha      string
 }
 
-var _ remote.Backend = &GitHubActionsCache{}
-
-// GitHubActionsCache implements RemoteBackend using GitHub Actions Cache API.
-// It uses GitHubCacheClient for API calls and blob.Uploader/Downloader for data transfer.
-type GitHubActionsCache struct {
-	logger      log.Logger
-	cacheClient *GHACacheClient
-	uploader    *remote.Uploader
-	downloader  *remote.Downloader
-}
-
-// NewGitHubActionsCache creates a new GitHub Actions Cache backend with pre-created dependencies.
-// This is a DI-friendly constructor that accepts cacheClient, uploader and downloader as parameters.
-// If uploader or downloader is nil, operations requiring them will be no-ops.
-func NewGitHubActionsCache(
+func GHACacheProvider(
 	ctx context.Context,
 	logger log.Logger,
 	config *GHACacheConfig,
-	localBackend local.Backend,
-) (*GitHubActionsCache, error) {
+) (DownloadClientProvider, UploadClientProvider, error) {
 	cacheClient, err := newGitHubCacheClient(
 		context.Background(),
 		logger,
@@ -61,126 +42,64 @@ func NewGitHubActionsCache(
 		config.Sha,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create github cache client: %w", err)
+		return nil, nil, fmt.Errorf("create github cache client: %w", err)
 	}
 
-	eg, ctx := errgroup.WithContext(ctx)
+	uploadClientProvider := func(ctx context.Context) (remote.UploadClient, error) {
+		uploadURL, err := cacheClient.createCacheEntry(ctx)
+		switch {
+		case errors.Is(err, ErrAlreadyExists):
+			logger.Infof("cache entry already exists, proceeding with uploader")
+		case err != nil:
+			return nil, fmt.Errorf("create cache entry: %w", err)
+		}
 
-	var downloader *remote.Downloader
-	eg.Go(func() error {
+		storageUploadClient, err := storage.NewAzureUploadClient(uploadURL)
+		if err != nil {
+			return nil, fmt.Errorf("create azure upload client: %w", err)
+		}
+
+		return storageUploadClient, nil
+	}
+
+	downloadClientProvider := func(ctx context.Context) (remote.DownloadClient, error) {
 		downloadURL, err := cacheClient.getDownloadURL(ctx)
 		if err != nil {
 			if !errors.Is(err, ErrCacheNotFound) {
-				return fmt.Errorf("get download url: %w", err)
+				return nil, fmt.Errorf("get download url: %w", err)
 			}
 			logger.Infof("no existing cache found, proceeding without downloader")
 
-			return nil
+			return nil, nil
 		}
 
 		storageDownloadClient, err := storage.NewAzureDownloadClient(downloadURL)
 		if err != nil {
-			return fmt.Errorf("create azure download client: %w", err)
+			return nil, fmt.Errorf("create azure download client: %w", err)
 		}
 
-		downloader, err = remote.NewDownloader(ctx, logger, storageDownloadClient)
-		if err != nil {
-			return fmt.Errorf("create downloader: %w", err)
-		}
-
-		return nil
-	})
-
-	var storageUploadClient *storage.AzureUploadClient
-	uploadURL, err := cacheClient.createCacheEntry(ctx)
-	switch {
-	case errors.Is(err, ErrAlreadyExists):
-		logger.Infof("cache entry already exists, proceeding with uploader")
-	case err != nil:
-		return nil, fmt.Errorf("create cache entry: %w", err)
-	default:
-		storageUploadClient, err = storage.NewAzureUploadClient(uploadURL)
-		if err != nil {
-			return nil, fmt.Errorf("create azure upload client: %w", err)
-		}
+		return storageDownloadClient, nil
 	}
 
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
-
-	var uploader *remote.Uploader
-	if storageUploadClient != nil {
-		uploader = remote.NewUploader(ctx, logger, storageUploadClient, downloader)
-	}
-
-	c := &GitHubActionsCache{
-		logger:     logger,
-		uploader:   uploader,
-		downloader: downloader,
-	}
-
-	if c.downloader != nil {
-		// Download all output blocks in the background.
-		// Use context.Background() because this should continue even if the parent context is cancelled.
-		go func() {
-			if err := c.downloader.DownloadAllOutputBlocks(context.Background(), func(ctx context.Context, objectID string) (io.WriteCloser, error) {
-				_, w, err := localBackend.Put(ctx, objectID, 0)
-				return w, err
-			}); err != nil {
-				logger.Errorf("download all output blocks: %v", err)
-			}
-		}()
-	}
-
-	logger.Infof("GitHub Actions cache backend initialized.")
-
-	return c, nil
+	return downloadClientProvider, uploadClientProvider, nil
 }
 
-func (c *GitHubActionsCache) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error) {
-	if c.downloader == nil {
-		return map[string]*v1.IndexEntry{}, nil
-	}
+var _ remote.UploadClient = (*ghaCacheUploadClientWrapper)(nil)
 
-	entries, err := c.downloader.GetEntries(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get entries: %w", err)
-	}
-
-	return entries, nil
+type ghaCacheUploadClientWrapper struct {
+	remote.UploadClient
+	client *ghaCacheClient
 }
 
-func (c *GitHubActionsCache) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	if c.uploader == nil {
-		return nil
+func (w *ghaCacheUploadClientWrapper) Commit(ctx context.Context, blockIDs []string, size int64) error {
+	if err := w.UploadClient.Commit(ctx, blockIDs, size); err != nil {
+		return fmt.Errorf("commit upload client: %w", err)
 	}
 
-	size, err := c.uploader.Commit(ctx, metaDataMap)
-	if err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-
-	if err := c.cacheClient.commitCacheEntry(ctx, size); err != nil {
+	if err := w.client.commitCacheEntry(ctx, size); err != nil {
 		return fmt.Errorf("commit cache entry: %w", err)
 	}
 
-	return nil
-}
-
-func (c *GitHubActionsCache) Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error {
-	if c.uploader == nil {
-		return nil
-	}
-
-	if err := c.uploader.UploadOutput(ctx, objectID, size, myio.NopSeekCloser(r)); err != nil {
-		return fmt.Errorf("upload output: %w", err)
-	}
-
-	return nil
-}
-
-func (c *GitHubActionsCache) Close(context.Context) error {
 	return nil
 }
 
@@ -202,9 +121,9 @@ var (
 
 var githubAPILatencyGauge = metrics.NewGauge("github_cache_api_latency")
 
-// GHACacheClient handles GitHub Actions Cache API calls.
+// ghaCacheClient handles GitHub Actions Cache API calls.
 // This is a standalone client that doesn't depend on GitHubActionsCache.
-type GHACacheClient struct {
+type ghaCacheClient struct {
 	logger     log.Logger
 	httpClient *http.Client
 	baseURL    *url.URL
@@ -221,7 +140,7 @@ func newGitHubCacheClient(
 	strBaseURL string,
 	runnerOS string,
 	ref, sha string,
-) (*GHACacheClient, error) {
+) (*ghaCacheClient, error) {
 	baseURL, err := url.Parse(strBaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
@@ -232,7 +151,7 @@ func newGitHubCacheClient(
 		AccessToken: token,
 	}))
 
-	return &GHACacheClient{
+	return &ghaCacheClient{
 		logger:     logger,
 		httpClient: httpClient,
 		baseURL:    baseURL,
@@ -243,7 +162,7 @@ func newGitHubCacheClient(
 }
 
 // blobKey returns the cache key and restore keys for this configuration.
-func (c *GHACacheClient) blobKey() (string, []string) {
+func (c *ghaCacheClient) blobKey() (string, []string) {
 	baseKey := actionsCachePrefix + actionsCacheSeparator + c.runnerOS
 	restoreKeys := make([]string, 0, 2)
 	for _, k := range []string{c.ref, c.sha} {
@@ -256,7 +175,7 @@ func (c *GHACacheClient) blobKey() (string, []string) {
 	return baseKey, restoreKeys
 }
 
-func (c *GHACacheClient) doRequest(ctx context.Context, endpoint string, reqBody any, respBody any) error {
+func (c *ghaCacheClient) doRequest(ctx context.Context, endpoint string, reqBody any, respBody any) error {
 	buf := &bytes.Buffer{}
 	err := json.NewEncoder(buf).Encode(reqBody)
 	if err != nil {
@@ -305,7 +224,7 @@ func (c *GHACacheClient) doRequest(ctx context.Context, endpoint string, reqBody
 }
 
 // GetDownloadURL fetches the signed download URL from GitHub Actions Cache API.
-func (c *GHACacheClient) getDownloadURL(ctx context.Context) (string, error) {
+func (c *ghaCacheClient) getDownloadURL(ctx context.Context) (string, error) {
 	key, restoreKeys := c.blobKey()
 	c.logger.Debugf("get download url: key=%s, restoreKeys=%v", key, restoreKeys)
 
@@ -333,7 +252,7 @@ func (c *GHACacheClient) getDownloadURL(ctx context.Context) (string, error) {
 }
 
 // createCacheEntry creates a new cache entry and returns the signed upload URL.
-func (c *GHACacheClient) createCacheEntry(ctx context.Context) (string, error) {
+func (c *ghaCacheClient) createCacheEntry(ctx context.Context) (string, error) {
 	key, _ := c.blobKey()
 	c.logger.Debugf("create cache entry: key=%s", key)
 
@@ -359,7 +278,7 @@ func (c *GHACacheClient) createCacheEntry(ctx context.Context) (string, error) {
 }
 
 // CommitCacheEntry finalizes the cache entry upload.
-func (c *GHACacheClient) commitCacheEntry(ctx context.Context, size int64) error {
+func (c *ghaCacheClient) commitCacheEntry(ctx context.Context, size int64) error {
 	key, _ := c.blobKey()
 	c.logger.Debugf("commit cache entry: key=%s, size=%d", key, size)
 

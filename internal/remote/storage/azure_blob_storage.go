@@ -69,7 +69,7 @@ func (a *AzureUploadClient) UploadBlockFromURL(ctx context.Context, blockID stri
 	return nil
 }
 
-func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string) error {
+func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string, _ int64) error {
 	var err error
 	latencyGauge.Stopwatch(func() {
 		_, err = a.client.CommitBlockList(ctx, blockIDs, nil)

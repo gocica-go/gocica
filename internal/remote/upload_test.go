@@ -92,7 +92,7 @@ func (m *mockUploadClient) UploadBlockFromURL(_ context.Context, _, url string, 
 	return errors.New("unexpected UploadBlockFromURL call for URL: " + url)
 }
 
-func (m *mockUploadClient) Commit(_ context.Context, _ []string) error {
+func (m *mockUploadClient) Commit(_ context.Context, _ []string, _ int64) error {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "Commit" {
@@ -500,7 +500,7 @@ func TestUploader_Commit(t *testing.T) {
 			provider := &mockBaseBlobProvider{}
 			uploader := tt.setupUploader(t.Context(), client, provider)
 
-			_, err := uploader.Commit(t.Context(), tt.entries)
+			err := uploader.Commit(t.Context(), tt.entries)
 
 			if tt.expectError {
 				if err == nil {
