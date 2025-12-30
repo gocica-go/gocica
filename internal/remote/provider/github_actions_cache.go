@@ -33,7 +33,7 @@ func GHACacheProvider(
 	config *GHACacheConfig,
 ) (DownloadClientProvider, UploadClientProvider, error) {
 	cacheClient, err := newGitHubCacheClient(
-		context.Background(),
+		ctx,
 		logger,
 		config.Token,
 		config.CacheURL,
@@ -50,6 +50,8 @@ func GHACacheProvider(
 		switch {
 		case errors.Is(err, ErrAlreadyExists):
 			logger.Infof("cache entry already exists, proceeding with uploader")
+
+			return nil, nil
 		case err != nil:
 			return nil, fmt.Errorf("create cache entry: %w", err)
 		}

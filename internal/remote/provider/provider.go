@@ -27,7 +27,7 @@ func UploadClientProviderExecutor(ctx context.Context, f UploadClientProvider) (
 	return f(ctx)
 }
 
-func ProviderSwitch(
+func Switch(
 	ctx context.Context,
 	logger log.Logger,
 	ghaCacheConfig *GHACacheConfig,

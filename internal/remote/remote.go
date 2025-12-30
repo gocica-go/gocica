@@ -30,7 +30,6 @@ type BackendImpl struct {
 
 // NewBackend creates a new RemoteBackend with the given uploader and downloader.
 func NewBackend(
-	ctx context.Context,
 	logger log.Logger,
 	localBackend local.Backend,
 	uploader *Uploader,

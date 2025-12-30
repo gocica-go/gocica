@@ -35,7 +35,7 @@ var _ = kessoku.Inject[*protocol.Process](
 	kessoku.Async(kessoku.Bind[remote.BaseBlobProvider](kessoku.Provide(remote.NewDownloader))),
 	kessoku.Async(kessoku.Provide(provider.DownloadClientProviderExecutor)),
 	kessoku.Async(kessoku.Provide(provider.UploadClientProviderExecutor)),
-	kessoku.Provide(provider.ProviderSwitch),
+	kessoku.Provide(provider.Switch),
 
 	kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))),
 

@@ -70,7 +70,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 			}
 		}
 		var err1 error
-		backendImpl, err1 = kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewBackend)).Fn()(ctx, logger, disk, uploader, downloader)
+		backendImpl, err1 = kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewBackend)).Fn()(logger, disk, uploader, downloader)
 		if err1 != nil {
 			return err1
 		}
@@ -102,7 +102,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 	}
 	close(diskCh)
 	var err4 error
-	downloadClientProvider, uploadClientProvider, err4 = kessoku.Provide(provider.ProviderSwitch).Fn()(ctx, logger, ghacacheConfig)
+	downloadClientProvider, uploadClientProvider, err4 = kessoku.Provide(provider.Switch).Fn()(ctx, logger, ghacacheConfig)
 	if err4 != nil {
 		var zero *protocol.Process
 		return zero, err4

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -266,7 +267,7 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 	blockIDs = append(blockIDs, newOutputIDs...)
 	err = u.client.Commit(ctx, blockIDs, int64(len(headerBuf))+outputSize)
 	if err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return fmt.Errorf("commit: %w", errors.Join(err, context.Cause(ctx)))
 	}
 
 	return nil
