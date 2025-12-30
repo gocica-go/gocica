@@ -67,10 +67,8 @@ func GHACacheProvider(
 	downloadClientProvider := func(ctx context.Context) (remote.DownloadClient, error) {
 		downloadURL, err := cacheClient.getDownloadURL(ctx)
 		if err != nil {
-			if !errors.Is(err, ErrCacheNotFound) {
-				return nil, fmt.Errorf("get download url: %w", err)
-			}
-			logger.Infof("no existing cache found, proceeding without downloader")
+			logger.Debugf("get download url: %v", err)
+			logger.Infof("cache not found, creating new cache entry")
 
 			return nil, nil
 		}
