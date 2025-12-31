@@ -61,7 +61,10 @@ func GHACacheProvider(
 			return nil, fmt.Errorf("create azure upload client: %w", err)
 		}
 
-		return storageUploadClient, nil
+		return &ghaCacheUploadClientWrapper{
+			UploadClient: storageUploadClient,
+			client:       cacheClient,
+		}, nil
 	}
 
 	downloadClientProvider := func(ctx context.Context) (core.DownloadClient, error) {
