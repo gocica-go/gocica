@@ -56,7 +56,7 @@ jobs:
       - name: Build standard library
         run: time go install std
         env:
-          GOCACHEPROG: "./${{ env.APP_NAME }}"
+          GOCACHEPROG: "./${{ env.APP_NAME }} -l debug"
   traq_build:
     name: Build traQ
     needs: [build]
