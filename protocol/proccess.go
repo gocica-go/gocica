@@ -269,6 +269,13 @@ func (p *Process) decodeWorker(ctx context.Context, r io.Reader, handler func(co
 	decoder := json.NewDecoder(dr)
 
 	for {
+		// Check if context was canceled (e.g., by handler error)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		err = dr.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
