@@ -356,9 +356,10 @@ func TestProcess_decodeWorker(t *testing.T) {
 			expectRequests: []*Request{putReqValue, getReqValue},
 		},
 		{
-			name:    "invalid json",
-			input:   `{"id":1,command":"get"}`,
-			wantErr: true,
+			name:  "invalid json",
+			input: `{"id":1,command":"get"}`,
+			// from sonic v1.14, no error occurs for invalid JSON.
+			wantErr: false,
 		},
 		{
 			name:      "handler error",
