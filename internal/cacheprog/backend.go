@@ -1,16 +1,17 @@
-package backend
+package cacheprog
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/mazrean/gocica/internal/metrics"
+	"github.com/mazrean/gocica/internal/local"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
+	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -19,19 +20,6 @@ import (
 type Backend interface {
 	Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error)
 	Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error)
-	Close(ctx context.Context) error
-}
-
-type LocalBackend interface {
-	Get(ctx context.Context, outputID string) (diskPath string, err error)
-	Put(ctx context.Context, outputID string, size int64) (diskPath string, w io.WriteCloser, err error)
-	Close(ctx context.Context) error
-}
-
-type RemoteBackend interface {
-	MetaData(ctx context.Context) (map[string]*v1.IndexEntry, error)
-	WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error
-	Put(ctx context.Context, objectID string, size int64, r io.ReadSeeker) error
 	Close(ctx context.Context) error
 }
 
@@ -55,8 +43,8 @@ var (
 type ConbinedBackend struct {
 	logger log.Logger
 
-	local  LocalBackend
-	remote RemoteBackend
+	local  local.Backend
+	remote remote.Backend
 
 	objectMapLocker sync.Mutex
 	objectMap       map[string]struct{}
@@ -68,7 +56,7 @@ type ConbinedBackend struct {
 	newMetaDataMap       map[string]*v1.IndexEntry
 }
 
-func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBackend) (*ConbinedBackend, error) {
+func NewConbinedBackend(logger log.Logger, local local.Backend, remote remote.Backend) (*ConbinedBackend, error) {
 	conbined := &ConbinedBackend{
 		logger:       logger,
 		eg:           &errgroup.Group{},
@@ -83,41 +71,41 @@ func NewConbinedBackend(logger log.Logger, local LocalBackend, remote RemoteBack
 	return conbined, nil
 }
 
-func (b *ConbinedBackend) start() {
+func (cb *ConbinedBackend) start() {
 	var err error
-	b.metaDataMap, err = b.remote.MetaData(context.Background())
+	cb.metaDataMap, err = cb.remote.MetaData(context.Background())
 	if err != nil {
-		b.logger.Warnf("parse remote metadata: %v. ignore the all remote cache.", err)
+		cb.logger.Warnf("parse remote metadata: %v. ignore the all remote cache.", err)
 	}
-	if b.metaDataMap == nil {
-		b.metaDataMap = map[string]*v1.IndexEntry{}
-	}
-
-	for _, indexEntry := range b.metaDataMap {
-		b.objectMap[indexEntry.OutputId] = struct{}{}
+	if cb.metaDataMap == nil {
+		cb.metaDataMap = map[string]*v1.IndexEntry{}
 	}
 
-	b.newMetaDataMap = make(map[string]*v1.IndexEntry, len(b.metaDataMap))
+	for _, indexEntry := range cb.metaDataMap {
+		cb.objectMap[indexEntry.OutputId] = struct{}{}
+	}
+
+	cb.newMetaDataMap = make(map[string]*v1.IndexEntry, len(cb.metaDataMap))
 	metaLimitLastUsedAt := time.Now().Add(-time.Hour * 24 * 7)
-	for actionID, metaData := range b.metaDataMap {
+	for actionID, metaData := range cb.metaDataMap {
 		if metaData.LastUsedAt.AsTime().After(metaLimitLastUsedAt) {
-			b.newMetaDataMap[actionID] = metaData
+			cb.newMetaDataMap[actionID] = metaData
 		}
 	}
 }
 
-func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
+func (cb *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath string, metaData *MetaData, err error) {
 	requestGauge.Set(1, "get")
 	defer requestGauge.Set(0, "get")
 
 	durationGauge.Stopwatch(func() {
-		indexEntry, ok := b.metaDataMap[actionID]
+		indexEntry, ok := cb.metaDataMap[actionID]
 		if !ok {
 			cacheHitGauge.Set(0, "meta_miss")
 			return
 		}
 
-		diskPath, err = b.local.Get(ctx, indexEntry.OutputId)
+		diskPath, err = cb.local.Get(ctx, indexEntry.OutputId)
 		if err != nil {
 			err = fmt.Errorf("get local cache: %w", err)
 			return
@@ -128,10 +116,10 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 			return
 		}
 
-		b.newMetaDataMapLocker.Lock()
-		defer b.newMetaDataMapLocker.Unlock()
-		indexEntry.LastUsedAt = b.nowTimestamp
-		b.newMetaDataMap[actionID] = indexEntry
+		cb.newMetaDataMapLocker.Lock()
+		defer cb.newMetaDataMapLocker.Unlock()
+		indexEntry.LastUsedAt = cb.nowTimestamp
+		cb.newMetaDataMap[actionID] = indexEntry
 
 		cacheHitGauge.Set(1, "hit")
 
@@ -146,7 +134,7 @@ func (b *ConbinedBackend) Get(ctx context.Context, actionID string) (diskPath st
 	return diskPath, metaData, err
 }
 
-func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
+func (cb *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, size int64, body myio.ClonableReadSeeker) (diskPath string, err error) {
 	requestGauge.Set(1, "put")
 	defer requestGauge.Set(0, "put")
 
@@ -155,27 +143,27 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 			OutputId:   outputID,
 			Size:       size,
 			Timenano:   time.Now().UnixNano(),
-			LastUsedAt: b.nowTimestamp,
+			LastUsedAt: cb.nowTimestamp,
 		}
 
 		func() {
-			b.newMetaDataMapLocker.Lock()
-			defer b.newMetaDataMapLocker.Unlock()
-			b.newMetaDataMap[actionID] = indexEntry
+			cb.newMetaDataMapLocker.Lock()
+			defer cb.newMetaDataMapLocker.Unlock()
+			cb.newMetaDataMap[actionID] = indexEntry
 		}()
 
 		var ok bool
 		func() {
-			b.objectMapLocker.Lock()
-			defer b.objectMapLocker.Unlock()
+			cb.objectMapLocker.Lock()
+			defer cb.objectMapLocker.Unlock()
 
-			_, ok = b.objectMap[outputID]
+			_, ok = cb.objectMap[outputID]
 			if !ok {
-				b.objectMap[outputID] = struct{}{}
+				cb.objectMap[outputID] = struct{}{}
 			}
 		}()
 		if ok {
-			diskPath, err = b.local.Get(ctx, outputID)
+			diskPath, err = cb.local.Get(ctx, outputID)
 			if err != nil {
 				err = fmt.Errorf("get local cache: %w", err)
 				return
@@ -198,8 +186,8 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 			localReader = body.Clone()
 		}
 
-		b.eg.Go(func() error {
-			if err := b.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
+		cb.eg.Go(func() error {
+			if err := cb.remote.Put(context.Background(), outputID, size, remoteReader); err != nil {
 				return fmt.Errorf("put remote cache: %w", err)
 			}
 
@@ -207,7 +195,7 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 		})
 
 		var w io.WriteCloser
-		diskPath, w, err = b.local.Put(ctx, outputID, size)
+		diskPath, w, err = cb.local.Put(ctx, outputID, size)
 		if err != nil {
 			err = fmt.Errorf("put: %w", err)
 			return
@@ -223,27 +211,27 @@ func (b *ConbinedBackend) Put(ctx context.Context, actionID, outputID string, si
 	return diskPath, err
 }
 
-func (b *ConbinedBackend) Close(ctx context.Context) (err error) {
+func (cb *ConbinedBackend) Close(ctx context.Context) (err error) {
 	requestGauge.Set(1, "close")
 	defer requestGauge.Set(0, "close")
 
 	durationGauge.Stopwatch(func() {
-		if waitErr := b.eg.Wait(); waitErr != nil {
+		if waitErr := cb.eg.Wait(); waitErr != nil {
 			err = fmt.Errorf("wait for all tasks: %w", waitErr)
 			return
 		}
 
-		if writeErr := b.remote.WriteMetaData(context.Background(), b.newMetaDataMap); writeErr != nil {
+		if writeErr := cb.remote.WriteMetaData(context.Background(), cb.newMetaDataMap); writeErr != nil {
 			err = fmt.Errorf("write remote metadata: %w", writeErr)
 			return
 		}
 
-		if closeErr := b.remote.Close(ctx); closeErr != nil {
+		if closeErr := cb.remote.Close(ctx); closeErr != nil {
 			err = fmt.Errorf("close remote backend: %w", closeErr)
 			return
 		}
 
-		if closeErr := b.local.Close(ctx); closeErr != nil {
+		if closeErr := cb.local.Close(ctx); closeErr != nil {
 			err = fmt.Errorf("close backend: %w", closeErr)
 			return
 		}
@@ -252,8 +240,4 @@ func (b *ConbinedBackend) Close(ctx context.Context) (err error) {
 	}, "close")
 
 	return err
-}
-
-func encodeID(id string) string {
-	return strings.ReplaceAll(id, "/", "-")
 }

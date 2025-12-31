@@ -1,24 +1,38 @@
-package blob
+package storage
 
 import (
 	"context"
 	"fmt"
 	"io"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
-	"github.com/mazrean/gocica/internal/metrics"
+	"github.com/mazrean/gocica/internal/pkg/http"
+	"github.com/mazrean/gocica/internal/pkg/metrics"
+	"github.com/mazrean/gocica/internal/remote/core"
 )
 
-var _ UploadClient = (*AzureUploadClient)(nil)
+var _ core.UploadClient = (*AzureUploadClient)(nil)
 var latencyGauge = metrics.NewGauge("azure_blob_storage_latency")
+
+var azureConfig = &blockblob.ClientOptions{
+	ClientOptions: azcore.ClientOptions{
+		Transport: http.NewClient(),
+	},
+}
 
 type AzureUploadClient struct {
 	client *blockblob.Client
 }
 
-func NewAzureUploadClient(client *blockblob.Client) *AzureUploadClient {
-	return &AzureUploadClient{client: client}
+func NewAzureUploadClient(url string) (*AzureUploadClient, error) {
+	client, err := blockblob.NewClientWithNoCredential(url, azureConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create upload client: %w", err)
+	}
+
+	return &AzureUploadClient{client: client}, nil
 }
 
 func (a *AzureUploadClient) UploadBlock(ctx context.Context, blockID string, r io.ReadSeekCloser) (int64, error) {
@@ -55,7 +69,7 @@ func (a *AzureUploadClient) UploadBlockFromURL(ctx context.Context, blockID stri
 	return nil
 }
 
-func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string) error {
+func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string, _ int64) error {
 	var err error
 	latencyGauge.Stopwatch(func() {
 		_, err = a.client.CommitBlockList(ctx, blockIDs, nil)
@@ -67,14 +81,19 @@ func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string) error
 	return nil
 }
 
-var _ DownloadClient = (*AzureDownloadClient)(nil)
+var _ core.DownloadClient = (*AzureDownloadClient)(nil)
 
 type AzureDownloadClient struct {
 	client *blockblob.Client
 }
 
-func NewAzureDownloadClient(client *blockblob.Client) *AzureDownloadClient {
-	return &AzureDownloadClient{client: client}
+func NewAzureDownloadClient(url string) (*AzureDownloadClient, error) {
+	client, err := blockblob.NewClientWithNoCredential(url, azureConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create download client: %w", err)
+	}
+
+	return &AzureDownloadClient{client: client}, nil
 }
 
 func (a *AzureDownloadClient) GetURL(context.Context) string {

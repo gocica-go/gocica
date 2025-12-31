@@ -1,4 +1,4 @@
-package backend
+package local
 
 import (
 	"context"
@@ -7,12 +7,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/mazrean/gocica/log"
 )
 
-var _ LocalBackend = &Disk{}
+type DiskDir string
+
+var _ Backend = &Disk{}
 
 type Disk struct {
 	logger   log.Logger
@@ -22,8 +25,10 @@ type Disk struct {
 	objectMap       map[string]*objectLocker
 }
 
-func NewDisk(logger log.Logger, dir string) (*Disk, error) {
-	err := os.MkdirAll(dir, 0755)
+func NewDisk(logger log.Logger, dir DiskDir) (*Disk, error) {
+	strDir := string(dir)
+
+	err := os.MkdirAll(strDir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("create root directory: %w", err)
 	}
@@ -32,7 +37,7 @@ func NewDisk(logger log.Logger, dir string) (*Disk, error) {
 
 	disk := &Disk{
 		logger:    logger,
-		rootPath:  dir,
+		rootPath:  strDir,
 		objectMap: map[string]*objectLocker{},
 	}
 
@@ -122,4 +127,8 @@ func (d *Disk) objectFilePath(id string) string {
 
 func (d *Disk) Close(context.Context) error {
 	return nil
+}
+
+func encodeID(id string) string {
+	return strings.ReplaceAll(id, "/", "-")
 }

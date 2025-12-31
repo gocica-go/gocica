@@ -1,4 +1,4 @@
-package blob
+package core
 
 import (
 	"bytes"
@@ -92,7 +92,7 @@ func (m *mockUploadClient) UploadBlockFromURL(_ context.Context, _, url string, 
 	return errors.New("unexpected UploadBlockFromURL call for URL: " + url)
 }
 
-func (m *mockUploadClient) Commit(_ context.Context, _ []string) error {
+func (m *mockUploadClient) Commit(_ context.Context, _ []string, _ int64) error {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
 		if call.method == "Commit" {
@@ -143,6 +143,21 @@ type mockBaseBlobProvider struct {
 	calls []mockCall
 }
 
+func (m *mockBaseBlobProvider) IsEmpty() bool {
+	for i := len(m.calls) - 1; i >= 0; i-- {
+		call := m.calls[i]
+		if call.method == "IsEmpty" {
+			if call.result[0] == nil {
+				return true
+			}
+			if b, ok := call.result[0].(bool); ok {
+				return b
+			}
+		}
+	}
+	return false
+}
+
 func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) ([]*v1.ActionsOutput, error) {
 	for i := len(m.calls) - 1; i >= 0; i-- {
 		call := m.calls[i]
@@ -182,6 +197,13 @@ func (m *mockBaseBlobProvider) GetOutputBlockURL(_ context.Context) (string, int
 		}
 	}
 	return "", 0, 0, errors.New("unexpected GetOutputBlockURL call")
+}
+
+func (m *mockBaseBlobProvider) expectIsEmpty(isEmpty bool) {
+	m.calls = append(m.calls, mockCall{
+		method: "IsEmpty",
+		result: []any{isEmpty},
+	})
 }
 
 func (m *mockBaseBlobProvider) expectGetOutputBlockURL(url string, offset, size int64, err error) {
@@ -268,12 +290,10 @@ func TestNewUploader(t *testing.T) {
 
 			client := &mockUploadClient{}
 			provider := &mockBaseBlobProvider{}
+			provider.expectIsEmpty(!tt.checkBaseFunc)
 			tt.mockSetup(client, provider)
 
-			var baseProvider BaseBlobProvider
-			if tt.checkBaseFunc {
-				baseProvider = provider
-			}
+			var baseProvider BaseBlobProvider = provider
 
 			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider)
 			if uploader == nil {
@@ -500,7 +520,7 @@ func TestUploader_Commit(t *testing.T) {
 			provider := &mockBaseBlobProvider{}
 			uploader := tt.setupUploader(t.Context(), client, provider)
 
-			_, err := uploader.Commit(t.Context(), tt.entries)
+			err := uploader.Commit(t.Context(), tt.entries)
 
 			if tt.expectError {
 				if err == nil {

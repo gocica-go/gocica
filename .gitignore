@@ -4,3 +4,6 @@
 *.prof
 /.gocica.json
 /dist
+/.serena/cache
+/.codex
+!/.codex/config.toml

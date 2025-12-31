@@ -1,4 +1,4 @@
-package backend
+package local
 
 import (
 	"context"
@@ -18,24 +18,24 @@ func TestNewDisk(t *testing.T) {
 		name          string
 		wantErr       bool
 		wantObjectMap map[string]*objectLocker
-		setup         func(t *testing.T) string
+		setup         func(t *testing.T) DiskDir
 	}{
 		{
 			name: "normal mode initialization",
-			setup: func(t *testing.T) string {
-				return t.TempDir()
+			setup: func(t *testing.T) DiskDir {
+				return DiskDir(t.TempDir())
 			},
 			wantObjectMap: map[string]*objectLocker{},
 		},
 		{
 			name:    "error on directory creation",
 			wantErr: true,
-			setup: func(t *testing.T) string {
+			setup: func(t *testing.T) DiskDir {
 				dir := t.TempDir()
 				if err := os.Chmod(dir, 0500); err != nil {
 					t.Fatal(err)
 				}
-				return filepath.Join(dir, "subdir")
+				return DiskDir(filepath.Join(dir, "subdir"))
 			},
 		},
 	}
@@ -129,7 +129,7 @@ func TestDisk_Get(t *testing.T) {
 				}
 			}
 
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, DiskDir(dir))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +214,7 @@ func TestDisk_Put(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			disk, err := NewDisk(log.DefaultLogger, dir)
+			disk, err := NewDisk(log.DefaultLogger, DiskDir(dir))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,6 +252,79 @@ func TestDisk_Put(t *testing.T) {
 
 			if diff := cmp.Diff(tt.data, content); diff != "" {
 				t.Errorf("content mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestEncodeID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		id   string
+		want struct {
+			result string
+			err    error
+		}
+	}{
+		{
+			name: "base64 without slash",
+			id:   "mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0=",
+			want: struct {
+				result string
+				err    error
+			}{
+				result: "mFrrgfLpmiSLw6bjO9ZS7F1d7I5fb2DQO3Br5W5e3U0=",
+			},
+		},
+		{
+			name: "base64 with one slash",
+			id:   "eqWF/jnj8u+hl4RcMhv+53OR",
+			want: struct {
+				result string
+				err    error
+			}{
+				result: "eqWF-jnj8u+hl4RcMhv+53OR",
+			},
+		},
+		{
+			name: "base64 with multiple slashes",
+			id:   "eq/WF/jn/j8u+hl4RcMhv+53OR",
+			want: struct {
+				result string
+				err    error
+			}{
+				result: "eq-WF-jn-j8u+hl4RcMhv+53OR",
+			},
+		},
+		{
+			name: "base64 with padding",
+			id:   "YWJjZA==",
+			want: struct {
+				result string
+				err    error
+			}{
+				result: "YWJjZA==",
+			},
+		},
+		{
+			name: "empty string",
+			id:   "",
+			want: struct {
+				result string
+				err    error
+			}{
+				result: "",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := encodeID(tt.id)
+			if diff := cmp.Diff(tt.want.result, got); diff != "" {
+				t.Errorf("encodeID result mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
