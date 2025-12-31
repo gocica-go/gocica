@@ -18,10 +18,10 @@ var _ remote.Backend = &Backend{}
 // Backend implements remote.Backend.
 // It uses Uploader/Downloader for data transfer.
 type Backend struct {
-	logger     log.Logger
-	uploader   *Uploader
-	downloader *Downloader
-	cancel     context.CancelCauseFunc
+	logger             log.Logger
+	uploader           *Uploader
+	downloader         *Downloader
+	downloadCancelFunc context.CancelCauseFunc
 }
 
 // NewBackend creates a new RemoteBackend with the given uploader and downloader.
@@ -39,7 +39,7 @@ func NewBackend(
 
 	if !c.downloader.IsEmpty() {
 		ctx := context.Background()
-		ctx, c.cancel = context.WithCancelCause(ctx)
+		ctx, c.downloadCancelFunc = context.WithCancelCause(ctx)
 
 		// Download all output blocks in the background.
 		go func() {
@@ -89,7 +89,9 @@ func (c *Backend) Put(ctx context.Context, objectID string, size int64, r io.Rea
 }
 
 func (c *Backend) Close(context.Context) error {
-	c.cancel(errors.New("backend closed"))
+	if c.downloadCancelFunc != nil {
+		c.downloadCancelFunc(errors.New("backend closed"))
+	}
 
 	return nil
 }
