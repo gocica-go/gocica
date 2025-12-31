@@ -69,7 +69,7 @@ func (u *Uploader) generateBlockID() (string, error) {
 const maxUploadChunkSize = 4 * (1 << 20)
 
 func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
-	if baseBlobProvider.IsEmpty() {
+	if baseBlobProvider.IsEmpty() || u.client == nil {
 		return func() ([]string, int64, []*v1.ActionsOutput, error) {
 			return nil, 0, nil, nil
 		}
