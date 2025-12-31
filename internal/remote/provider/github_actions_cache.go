@@ -13,7 +13,7 @@ import (
 
 	"github.com/mazrean/gocica/internal/pkg/json"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
-	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/internal/remote/storage"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
@@ -45,11 +45,11 @@ func GHACacheProvider(
 		return nil, nil, fmt.Errorf("create github cache client: %w", err)
 	}
 
-	uploadClientProvider := func(ctx context.Context) (remote.UploadClient, error) {
+	uploadClientProvider := func(ctx context.Context) (core.UploadClient, error) {
 		uploadURL, err := cacheClient.createCacheEntry(ctx)
 		switch {
 		case errors.Is(err, ErrAlreadyExists):
-			logger.Infof("cache entry already exists, proceeding with uploader")
+			logger.Infof("cache entry already exists. skipping upload.")
 
 			return nil, nil
 		case err != nil:
@@ -64,11 +64,11 @@ func GHACacheProvider(
 		return storageUploadClient, nil
 	}
 
-	downloadClientProvider := func(ctx context.Context) (remote.DownloadClient, error) {
+	downloadClientProvider := func(ctx context.Context) (core.DownloadClient, error) {
 		downloadURL, err := cacheClient.getDownloadURL(ctx)
 		if err != nil {
 			logger.Debugf("get download url: %v", err)
-			logger.Infof("cache not found, creating new cache entry")
+			logger.Infof("cache not found. building without cache.")
 
 			return nil, nil
 		}
@@ -84,10 +84,10 @@ func GHACacheProvider(
 	return downloadClientProvider, uploadClientProvider, nil
 }
 
-var _ remote.UploadClient = (*ghaCacheUploadClientWrapper)(nil)
+var _ core.UploadClient = (*ghaCacheUploadClientWrapper)(nil)
 
 type ghaCacheUploadClientWrapper struct {
-	remote.UploadClient
+	core.UploadClient
 	client *ghaCacheClient
 }
 

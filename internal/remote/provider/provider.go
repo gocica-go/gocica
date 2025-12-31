@@ -3,27 +3,19 @@ package provider
 import (
 	"context"
 
-	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/log"
 )
 
-type DownloadClientProvider func(context.Context) (remote.DownloadClient, error)
+type DownloadClientProvider func(context.Context) (core.DownloadClient, error)
 
-func DownloadClientProviderExecutor(ctx context.Context, f DownloadClientProvider) (remote.DownloadClient, error) {
-	if f == nil {
-		return nil, nil
-	}
-
+func DownloadClientProviderExecutor(ctx context.Context, f DownloadClientProvider) (core.DownloadClient, error) {
 	return f(ctx)
 }
 
-type UploadClientProvider func(context.Context) (remote.UploadClient, error)
+type UploadClientProvider func(context.Context) (core.UploadClient, error)
 
-func UploadClientProviderExecutor(ctx context.Context, f UploadClientProvider) (remote.UploadClient, error) {
-	if f == nil {
-		return nil, nil
-	}
-
+func UploadClientProviderExecutor(ctx context.Context, f UploadClientProvider) (core.UploadClient, error) {
 	return f(ctx)
 }
 

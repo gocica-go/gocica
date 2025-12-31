@@ -7,6 +7,7 @@ import (
 	"github.com/mazrean/gocica/internal/cacheprog"
 	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/internal/remote/provider"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
@@ -21,14 +22,14 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 		downloadClientProvider   provider.DownloadClientProvider
 		downloadClientProviderCh = make(chan struct{})
 		uploadClientProvider     provider.UploadClientProvider
-		uploadClient             remote.UploadClient
+		uploadClient             core.UploadClient
 		uploadClientCh           = make(chan struct{})
-		downloadClient           remote.DownloadClient
-		downloader               *remote.Downloader
+		downloadClient           core.DownloadClient
+		downloader               *core.Downloader
 		downloaderCh             = make(chan struct{})
-		uploader                 *remote.Uploader
-		backendImpl              *remote.BackendImpl
-		backendImplCh            = make(chan struct{})
+		uploader                 *core.Uploader
+		backend                  *core.Backend
+		backendCh                = make(chan struct{})
 		conbinedBackend          *cacheprog.ConbinedBackend
 		cacheProg                *cacheprog.CacheProg
 		process                  *protocol.Process
@@ -46,7 +47,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 			return err
 		}
 		var err0 error
-		downloader, err0 = kessoku.Async(kessoku.Bind[remote.BaseBlobProvider](kessoku.Provide(remote.NewDownloader))).Fn()(ctx, logger, downloadClient)
+		downloader, err0 = kessoku.Async(kessoku.Bind[core.BaseBlobProvider](kessoku.Provide(core.NewDownloader))).Fn()(ctx, logger, downloadClient)
 		if err0 != nil {
 			return err0
 		}
@@ -61,7 +62,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 				return ctx.Err()
 			}
 		}
-		uploader = kessoku.Async(kessoku.Provide(remote.NewUploader)).Fn()(ctx, logger, uploadClient, downloader)
+		uploader = kessoku.Async(kessoku.Provide(core.NewUploader)).Fn()(ctx, logger, uploadClient, downloader)
 		for _, ch := range []<-chan struct{}{diskCh, downloaderCh} {
 			select {
 			case <-ch:
@@ -70,15 +71,15 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 			}
 		}
 		var err1 error
-		backendImpl, err1 = kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewBackend)).Fn()(logger, disk, uploader, downloader)
+		backend, err1 = kessoku.Bind[remote.Backend](kessoku.Provide(core.NewBackend)).Fn()(logger, disk, uploader, downloader)
 		if err1 != nil {
 			return err1
 		}
-		close(backendImplCh)
+		close(backendCh)
 		return nil
 	})
 	eg.Go(func() error {
-		for _, ch := range []<-chan struct{}{diskCh, backendImplCh} {
+		for _, ch := range []<-chan struct{}{diskCh, backendCh} {
 			select {
 			case <-ch:
 			case <-ctx.Done():
@@ -86,7 +87,7 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 			}
 		}
 		var err2 error
-		conbinedBackend, err2 = kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))).Fn()(logger, disk, backendImpl)
+		conbinedBackend, err2 = kessoku.Async(kessoku.Bind[cacheprog.Backend](kessoku.Provide(cacheprog.NewConbinedBackend))).Fn()(logger, disk, backend)
 		if err2 != nil {
 			return err2
 		}

@@ -4,6 +4,7 @@ import (
 	"github.com/mazrean/gocica/internal/cacheprog"
 	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/internal/remote/provider"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
@@ -30,9 +31,9 @@ var _ = kessoku.Inject[*protocol.Process](
 	"InitializeProcess",
 	kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))),
 
-	kessoku.Bind[remote.Backend](kessoku.Provide(remote.NewBackend)),
-	kessoku.Async(kessoku.Provide(remote.NewUploader)),
-	kessoku.Async(kessoku.Bind[remote.BaseBlobProvider](kessoku.Provide(remote.NewDownloader))),
+	kessoku.Bind[remote.Backend](kessoku.Provide(core.NewBackend)),
+	kessoku.Async(kessoku.Provide(core.NewUploader)),
+	kessoku.Async(kessoku.Bind[core.BaseBlobProvider](kessoku.Provide(core.NewDownloader))),
 	kessoku.Async(kessoku.Provide(provider.DownloadClientProviderExecutor)),
 	kessoku.Async(kessoku.Provide(provider.UploadClientProviderExecutor)),
 	kessoku.Provide(provider.Switch),

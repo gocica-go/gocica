@@ -10,10 +10,10 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/mazrean/gocica/internal/pkg/http"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
-	"github.com/mazrean/gocica/internal/remote"
+	"github.com/mazrean/gocica/internal/remote/core"
 )
 
-var _ remote.UploadClient = (*AzureUploadClient)(nil)
+var _ core.UploadClient = (*AzureUploadClient)(nil)
 var latencyGauge = metrics.NewGauge("azure_blob_storage_latency")
 
 var azureConfig = &blockblob.ClientOptions{
@@ -81,7 +81,7 @@ func (a *AzureUploadClient) Commit(ctx context.Context, blockIDs []string, _ int
 	return nil
 }
 
-var _ remote.DownloadClient = (*AzureDownloadClient)(nil)
+var _ core.DownloadClient = (*AzureDownloadClient)(nil)
 
 type AzureDownloadClient struct {
 	client *blockblob.Client

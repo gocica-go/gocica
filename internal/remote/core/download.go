@@ -1,8 +1,9 @@
-package remote
+package core
 
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -17,7 +18,8 @@ import (
 )
 
 type Downloader struct {
-	logger     log.Logger
+	logger log.Logger
+	// warning: client can be nil, which means no download is needed.
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
@@ -32,11 +34,11 @@ type DownloadClient interface {
 
 // NewDownloader creates a new Downloader with the given client.
 // It reads the header from the remote storage immediately.
-func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient) (*Downloader, error) {
-	if client == nil {
-		return nil, nil
-	}
-
+func NewDownloader(
+	ctx context.Context,
+	logger log.Logger,
+	client DownloadClient,
+) (*Downloader, error) {
 	downloader := &Downloader{
 		logger: logger,
 		client: client,
@@ -51,19 +53,15 @@ func NewDownloader(ctx context.Context, logger log.Logger, client DownloadClient
 	return downloader, nil
 }
 
-// InitHeader initializes the header by reading from the remote storage.
-// This must be called before using GetEntries, GetOutputs, or DownloadAllOutputBlocks.
-func (d *Downloader) InitHeader(ctx context.Context, logger log.Logger) error {
-	d.logger = logger
-	var err error
-	d.header, d.headerSize, err = d.readHeader(ctx)
-	if err != nil {
-		return fmt.Errorf("read header: %w", err)
-	}
-	return nil
-}
-
 func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, headerSize int64, err error) {
+	if d.client == nil {
+		return &v1.ActionsCache{
+			Entries:         map[string]*v1.IndexEntry{},
+			Outputs:         nil,
+			OutputTotalSize: 0,
+		}, 0, nil
+	}
+
 	sizeBuf := make([]byte, 8)
 	err = d.client.DownloadBlockBuffer(ctx, 0, 8, sizeBuf)
 	if err != nil {
@@ -94,7 +92,15 @@ func (d *Downloader) GetOutputs(context.Context) (outputs []*v1.ActionsOutput, e
 	return d.header.Outputs, nil
 }
 
+func (d *Downloader) IsEmpty() bool {
+	return d.header.OutputTotalSize == 0
+}
+
 func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error) {
+	if d.client == nil {
+		return "", 0, 0, errors.New("no download client")
+	}
+
 	url = d.client.GetURL(ctx)
 	offset = d.headerSize
 	size = d.header.OutputTotalSize
@@ -109,6 +115,10 @@ const maxChunkSize = 4 * (1 << 20)
 const openFileLimit = 100000
 
 func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
+	if d.client == nil {
+		return nil
+	}
+
 	outputs := d.header.Outputs
 	slices.SortFunc(outputs, func(x, y *v1.ActionsOutput) int {
 		return int(x.Offset - y.Offset)

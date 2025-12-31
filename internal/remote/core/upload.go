@@ -1,4 +1,4 @@
-package remote
+package core
 
 import (
 	"bytes"
@@ -23,7 +23,8 @@ import (
 var compressGauge = metrics.NewGauge("blob_compress_latency")
 
 type Uploader struct {
-	logger        log.Logger
+	logger log.Logger
+	// warning: client can be nil, which means no upload is needed.
 	client        UploadClient
 	outputsLocker sync.RWMutex
 	outputs       []*v1.ActionsOutput
@@ -38,6 +39,7 @@ type UploadClient interface {
 }
 
 type BaseBlobProvider interface {
+	IsEmpty() bool
 	GetOutputs(ctx context.Context) (outputs []*v1.ActionsOutput, err error)
 	GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error)
 }
@@ -46,10 +48,6 @@ type waitBaseFunc func() (baseBlockIDs []string, baseOutputSize int64, baseOutpu
 
 // NewUploader creates a new Uploader with the given client and base blob provider.
 func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
-	if client == nil {
-		return nil
-	}
-
 	uploader := &Uploader{
 		logger: logger,
 		client: client,
@@ -71,7 +69,7 @@ func (u *Uploader) generateBlockID() (string, error) {
 const maxUploadChunkSize = 4 * (1 << 20)
 
 func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
-	if baseBlobProvider == nil {
+	if baseBlobProvider.IsEmpty() {
 		return func() ([]string, int64, []*v1.ActionsOutput, error) {
 			return nil, 0, nil, nil
 		}
@@ -135,6 +133,10 @@ func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 }
 
 func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64, r io.ReadSeekCloser) error {
+	if u.client == nil {
+		return nil
+	}
+
 	var (
 		reader      io.ReadSeeker
 		compression v1.Compression
@@ -236,6 +238,10 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1
 }
 
 func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) error {
+	if u.client == nil {
+		return nil
+	}
+
 	baseBlockIDs, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
 	if err != nil {
 		u.logger.Warnf("failed to upload base: %v", err)
