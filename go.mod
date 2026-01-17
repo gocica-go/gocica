@@ -16,7 +16,7 @@ require (
 require (
 	github.com/DataDog/zstd v1.5.6
 	github.com/felixge/fgprof v0.9.5
-	github.com/mazrean/kessoku v1.0.1-0.20251228025041-cb56d3314c27
+	github.com/mazrean/kessoku v1.1.0
 	github.com/prometheus/procfs v0.19.2
 )
 

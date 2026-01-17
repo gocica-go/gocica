@@ -58,8 +58,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80/go.mod h1:imJHygn/1yfhB7XSJJKlFZKl/J+dCPAknuiaGOshXAs=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
-github.com/mazrean/kessoku v1.0.1-0.20251228025041-cb56d3314c27 h1:kAloi/cvHliECGXIZHK/Hdvwm56v6HcMSTYLLdpM+5w=
-github.com/mazrean/kessoku v1.0.1-0.20251228025041-cb56d3314c27/go.mod h1:k6lkm/3MwpAfwUsiec0sEkOfjJ+ci8plcQOeo3mJeQE=
+github.com/mazrean/kessoku v1.1.0 h1:Vkv1PaUR/Y8PuOX6tXZh4lmh07b3Cpgzu7J3YS0H01A=
+github.com/mazrean/kessoku v1.1.0/go.mod h1:k6lkm/3MwpAfwUsiec0sEkOfjJ+ci8plcQOeo3mJeQE=
 github.com/orisano/pixelmatch v0.0.0-20220722002657-fb0b55479cde/go.mod h1:nZgzbfBr3hhjoZnS66nKrHmduYNpc34ny7RK4z5/HM0=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
