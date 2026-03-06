@@ -1,6 +1,6 @@
 module github.com/mazrean/gocica
 
-go 1.24.1
+go 1.25.0
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.0
@@ -17,7 +17,7 @@ require (
 	github.com/DataDog/zstd v1.5.6
 	github.com/felixge/fgprof v0.9.5
 	github.com/mazrean/kessoku v1.1.0
-	github.com/prometheus/procfs v0.19.2
+	github.com/prometheus/procfs v0.20.1
 )
 
 require (
@@ -30,7 +30,7 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	golang.org/x/arch v0.14.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 )
 
