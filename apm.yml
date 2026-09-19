@@ -1,0 +1,8 @@
+name: odjson
+version: 0.1.0
+description: APM package for odjson
+
+dependencies:
+  apm:
+    - mazrean/apm-plackage/common
+    - mazrean/apm-plackage/go
