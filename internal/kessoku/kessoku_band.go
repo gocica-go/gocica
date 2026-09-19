@@ -17,6 +17,8 @@ import (
 
 func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.DiskDir, ghacacheConfig *provider.GHACacheConfig) (*protocol.Process, error) {
 	var (
+		compressionPolicy        core.CompressionPolicy
+		compressionPolicyCh      = make(chan struct{})
 		disk                     *local.Disk
 		diskCh                   = make(chan struct{})
 		downloadClientProvider   provider.DownloadClientProvider
@@ -55,14 +57,14 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 		return nil
 	})
 	eg.Go(func() error {
-		for _, ch := range []<-chan struct{}{uploadClientCh, downloaderCh} {
+		for _, ch := range []<-chan struct{}{uploadClientCh, downloaderCh, compressionPolicyCh} {
 			select {
 			case <-ch:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 		}
-		uploader = kessoku.Async(kessoku.Provide(core.NewUploader)).Fn()(ctx, logger, uploadClient, downloader)
+		uploader = kessoku.Async(kessoku.Provide(core.NewUploader)).Fn()(ctx, logger, uploadClient, downloader, compressionPolicy)
 		for _, ch := range []<-chan struct{}{diskCh, downloaderCh} {
 			select {
 			case <-ch:
@@ -95,6 +97,8 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 		process = kessoku.Provide(NewProcessWithOptions).Fn()(logger, cacheProg)
 		return nil
 	})
+	compressionPolicy = kessoku.Value[core.CompressionPolicy](core.DefaultCompressionPolicy).Fn()()
+	close(compressionPolicyCh)
 	var err3 error
 	disk, err3 = kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))).Fn()(logger, diskDir)
 	if err3 != nil {

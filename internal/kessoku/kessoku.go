@@ -32,6 +32,7 @@ var _ = kessoku.Inject[*protocol.Process](
 	kessoku.Async(kessoku.Bind[local.Backend](kessoku.Provide(local.NewDisk))),
 
 	kessoku.Bind[remote.Backend](kessoku.Provide(core.NewBackend)),
+	kessoku.Value[core.CompressionPolicy](core.DefaultCompressionPolicy),
 	kessoku.Async(kessoku.Provide(core.NewUploader)),
 	kessoku.Async(kessoku.Bind[core.BaseBlobProvider](kessoku.Provide(core.NewDownloader))),
 	kessoku.Async(kessoku.Provide(provider.DownloadClientProviderExecutor)),

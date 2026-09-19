@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
@@ -22,14 +23,43 @@ import (
 
 var compressGauge = metrics.NewGauge("blob_compress_latency")
 
+// compressThresholdBytes is the size above which an output is zstd-compressed by
+// DefaultCompressionPolicy.
+const compressThresholdBytes = 100 << 10
+
+// CompressionPolicy reports whether an output should be zstd-compressed.
+// It is consulted once per output, before the bytes are read.
+type CompressionPolicy func(objectID string, size int64) bool
+
+// DefaultCompressionPolicy compresses every output larger than compressThresholdBytes.
+func DefaultCompressionPolicy(_ string, size int64) bool {
+	return size > compressThresholdBytes
+}
+
 type Uploader struct {
 	logger log.Logger
 	// warning: client can be nil, which means no upload is needed.
 	client        UploadClient
 	outputsLocker sync.RWMutex
 	outputs       []*v1.ActionsOutput
-	waitBaseFunc  waitBaseFunc
+	compression   CompressionPolicy
+
+	// The base blob copy is started lazily, on the first output upload.
+	// Starting it in the constructor would pin a signed URL that can expire
+	// before the flush of a long-lived process, silently dropping the whole
+	// previous blob. See setupBase.
+	baseProvider BaseBlobProvider
+	baseOnce     sync.Once
+	waitBaseFunc waitBaseFunc
+
+	uploadDisabled atomic.Bool
 }
+
+// ErrUploadDisabled is returned by an UploadClient when the remote will not accept
+// this run's blob at all, for instance because another job already published the
+// same cache key. It is not a failure: the Uploader stops uploading and the build
+// carries on with whatever it restored.
+var ErrUploadDisabled = errors.New("upload disabled")
 
 // UploadClient defines the interface for uploading blocks to remote storage.
 type UploadClient interface {
@@ -47,15 +77,29 @@ type BaseBlobProvider interface {
 type waitBaseFunc func() (baseBlockIDs []string, baseOutputSize int64, baseOutputs []*v1.ActionsOutput, err error)
 
 // NewUploader creates a new Uploader with the given client and base blob provider.
-func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider) *Uploader {
-	uploader := &Uploader{
-		logger: logger,
-		client: client,
+// A nil compression policy falls back to DefaultCompressionPolicy.
+func NewUploader(ctx context.Context, logger log.Logger, client UploadClient, baseBlobProvider BaseBlobProvider, compression CompressionPolicy) *Uploader {
+	if compression == nil {
+		compression = DefaultCompressionPolicy
 	}
 
-	uploader.waitBaseFunc = uploader.setupBase(baseBlobProvider)
+	return &Uploader{
+		logger:       logger,
+		client:       client,
+		compression:  compression,
+		baseProvider: baseBlobProvider,
+	}
+}
 
-	return uploader
+// ensureBase starts the base blob copy exactly once. It is called from the first
+// UploadOutput so the server-side copy overlaps with the outputs being staged,
+// and from Commit for the case where the caller committed without uploading.
+func (u *Uploader) ensureBase() waitBaseFunc {
+	u.baseOnce.Do(func() {
+		u.waitBaseFunc = u.setupBase(u.baseProvider)
+	})
+
+	return u.waitBaseFunc
 }
 
 func (u *Uploader) generateBlockID() (string, error) {
@@ -133,7 +177,7 @@ func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 }
 
 func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64, r io.ReadSeekCloser) error {
-	if u.client == nil {
+	if u.client == nil || u.uploadDisabled.Load() {
 		return nil
 	}
 
@@ -141,7 +185,7 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 		reader      io.ReadSeeker
 		compression v1.Compression
 	)
-	if size > 100*(2^10) {
+	if u.compression(outputID, size) {
 		buf := bytes.NewBuffer(nil)
 		zw := zstd.NewWriterLevel(buf, 1)
 
@@ -170,10 +214,20 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	} else {
 		var err error
 		uploadSize, err = u.client.UploadBlock(ctx, outputID, myio.NopSeekCloser(reader))
+		if errors.Is(err, ErrUploadDisabled) {
+			u.uploadDisabled.Store(true)
+			u.logger.Infof("remote refused this run's cache entry. continuing without upload.")
+
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("upload block: %w", err)
 		}
 	}
+
+	// Only now do we know the remote accepts writes, so the server-side copy of the
+	// previous blob is worth starting. It then overlaps with the remaining outputs.
+	u.ensureBase()
 
 	u.outputsLocker.Lock()
 	defer u.outputsLocker.Unlock()
@@ -184,6 +238,13 @@ func (u *Uploader) UploadOutput(ctx context.Context, outputID string, size int64
 	})
 
 	return nil
+}
+
+func (u *Uploader) newOutputCount() int {
+	u.outputsLocker.RLock()
+	defer u.outputsLocker.RUnlock()
+
+	return len(u.outputs)
 }
 
 func (u *Uploader) constructOutputs(baseOutputSize int64, baseOutputs []*v1.ActionsOutput) ([]string, []*v1.ActionsOutput, int64) {
@@ -238,11 +299,18 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1
 }
 
 func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) error {
-	if u.client == nil {
+	if u.client == nil || u.uploadDisabled.Load() {
 		return nil
 	}
 
-	baseBlockIDs, baseOutputSize, baseOutputs, err := u.waitBaseFunc()
+	// Nothing was staged, so the blob would be a byte-for-byte copy of the base.
+	// Skip the whole round trip: the restore key chain still finds the base entry.
+	if u.newOutputCount() == 0 {
+		u.logger.Infof("no new output in this run. skipping cache entry upload.")
+		return nil
+	}
+
+	baseBlockIDs, baseOutputSize, baseOutputs, err := u.ensureBase()()
 	if err != nil {
 		u.logger.Warnf("failed to upload base: %v", err)
 		baseBlockIDs = nil
@@ -263,6 +331,11 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 	}
 
 	_, err = u.client.UploadBlock(ctx, headerBlockID, myio.NopSeekCloser(bytes.NewReader(headerBuf)))
+	if errors.Is(err, ErrUploadDisabled) {
+		u.logger.Infof("remote refused this run's cache entry. continuing without upload.")
+
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("upload header: %w", err)
 	}

@@ -295,12 +295,12 @@ func TestNewUploader(t *testing.T) {
 
 			var baseProvider BaseBlobProvider = provider
 
-			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider)
+			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider, nil)
 			if uploader == nil {
 				t.Fatal("uploader is nil")
 			}
 
-			baseBlockIDs, size, outputs, err := uploader.waitBaseFunc()
+			baseBlockIDs, size, outputs, err := uploader.ensureBase()()
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -389,7 +389,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 			t.Parallel()
 
 			client := &mockUploadClient{}
-			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{})
+			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{}, nil)
 
 			reader, err := tt.setupMock(client)
 			if err != nil {
@@ -442,7 +442,7 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
-				return NewUploader(ctx, log.DefaultLogger, client, provider)
+				return NewUploader(ctx, log.DefaultLogger, client, provider, nil)
 			},
 		},
 		{
@@ -462,7 +462,7 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
 
-				uploader := NewUploader(ctx, log.DefaultLogger, client, provider)
+				uploader := NewUploader(ctx, log.DefaultLogger, client, provider, nil)
 				uploader.outputs = []*v1.ActionsOutput{
 					{
 						Id:          "new-output",
@@ -504,9 +504,37 @@ func TestUploader_Commit(t *testing.T) {
 				client.expectUploadBlockFromURL(0, 100, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(errors.New("commit error"))
-				return NewUploader(ctx, log.DefaultLogger, client, provider)
+				uploader := NewUploader(ctx, log.DefaultLogger, client, provider, nil)
+				uploader.outputs = []*v1.ActionsOutput{
+					{
+						Id:          "new-output",
+						Size:        50,
+						Compression: v1.Compression_COMPRESSION_ZSTD,
+					},
+				}
+				return uploader
 			},
 			expectError: true,
+		},
+		{
+			name: "no new output skips the whole upload",
+			entries: map[string]*v1.IndexEntry{
+				"test": {
+					OutputId:   "test",
+					Size:       100,
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.Now(),
+				},
+			},
+			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
+				// No expectations registered: touching the remote at all must fail the test.
+				return NewUploader(ctx, log.DefaultLogger, client, provider, nil)
+			},
+			validateState: func(t *testing.T, u *Uploader) {
+				if u.waitBaseFunc != nil {
+					t.Error("base copy must not be started when nothing was uploaded")
+				}
+			},
 		},
 	}
 
