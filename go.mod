@@ -10,7 +10,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/mazrean/kessoku v1.1.0
 	github.com/mazrean/odjson v0.2.0
-	github.com/prometheus/procfs v0.19.2
+	github.com/prometheus/procfs v0.22.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.23.0
 	google.golang.org/protobuf v1.36.11
