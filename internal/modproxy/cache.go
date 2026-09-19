@@ -90,6 +90,11 @@ type Cache struct {
 
 	fetchGroup singleflight.Group
 	stored     atomic.Int64
+	// closed is set when the flush starts. After that an object may still be
+	// served from disk, but it must not enter the index: the flush has already
+	// waited for the uploads, so a late entry would point at bytes that never
+	// reached the blob.
+	closed atomic.Bool
 	// uploads run in the background so a 70 MB module zip is not transferred to
 	// the remote while the go command's request is still open. Flush waits.
 	uploads errgroup.Group
@@ -231,6 +236,14 @@ func (c *Cache) Store(ctx context.Context, path string, w *Writer, compressible 
 		return "", fmt.Errorf("commit object: %w", err)
 	}
 
+	if c.closed.Load() {
+		// Still on disk and still servable for the rest of this run; just not
+		// published.
+		c.logger.Debugf("module cache already flushed; not indexing %s", path)
+
+		return objectID, nil
+	}
+
 	if !compressible {
 		c.compressions.SkipCompression(objectID)
 	}
@@ -295,6 +308,8 @@ func (c *Cache) Stored() int64 {
 // Flush publishes the index. It is a no-op when nothing new was stored, so a
 // fully warm run never writes to the remote at all.
 func (c *Cache) Flush(ctx context.Context) error {
+	c.closed.Store(true)
+
 	if c.uploader == nil {
 		return nil
 	}

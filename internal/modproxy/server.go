@@ -1,6 +1,7 @@
 package modproxy
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,13 @@ type Server struct {
 	client   *http.Client
 
 	fetchGroup singleflight.Group
-	shutdown   func()
+	lifecycle  Lifecycle
+}
+
+// Lifecycle is the part of the daemon the shutdown endpoint drives.
+type Lifecycle interface {
+	Stop()
+	WaitFlush(ctx context.Context) error
 }
 
 // NewServer builds the proxy handler. A nil upstream turns every miss into a 404,
@@ -45,9 +52,9 @@ func NewServer(logger log.Logger, cache *Cache, upstream *url.URL) *Server {
 	}
 }
 
-// SetShutdown installs the callback invoked by POST /-/shutdown.
-func (s *Server) SetShutdown(f func()) {
-	s.shutdown = f
+// SetLifecycle installs the daemon driven by POST /-/shutdown.
+func (s *Server) SetLifecycle(l Lifecycle) {
+	s.lifecycle = l
 }
 
 // ServeHTTP implements the GOPROXY protocol.
@@ -109,19 +116,27 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.shutdown == nil {
+	if s.lifecycle == nil {
 		http.Error(w, "shutdown is not available", http.StatusNotImplemented)
 
 		return
 	}
 
+	// Answer only once the cache has actually been published. A post step that
+	// returned early would let the job finish -- and the runner kill us -- with
+	// the upload still in flight.
+	s.lifecycle.Stop()
+	err := s.lifecycle.WaitFlush(r.Context())
+
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, "{\"ok\":true,\"stored\":%d}\n", s.cache.Stored())
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "{\"ok\":false,\"error\":%q}\n", err.Error())
+
+		return
 	}
 
-	go s.shutdown()
+	fmt.Fprintf(w, "{\"ok\":true,\"stored\":%d}\n", s.cache.Stored())
 }
 
 // serveUpstream fetches a missing object, streaming it to the client and into the

@@ -58,6 +58,8 @@ type Daemon struct {
 
 	stopOnce sync.Once
 	stop     chan struct{}
+	flushed  chan struct{}
+	flushErr error
 }
 
 // NewDaemon binds the listen address.
@@ -82,12 +84,13 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 		stateFile: config.StateFile,
 		lifetime:  config.MaxLifetime,
 		stop:      make(chan struct{}),
+		flushed:   make(chan struct{}),
 	}
 	daemon.httpSrv = &http.Server{
 		Handler:           server,
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
-	server.SetShutdown(daemon.Stop)
+	server.SetLifecycle(daemon)
 
 	return daemon, nil
 }
@@ -108,11 +111,25 @@ func (d *Daemon) GOPROXY(previous string) string {
 	return d.URL() + "|" + previous
 }
 
-// Stop asks the daemon to drain, flush and exit. It is safe to call repeatedly.
+// Stop asks the daemon to flush and exit. It is safe to call repeatedly.
 func (d *Daemon) Stop() {
 	d.stopOnce.Do(func() {
 		close(d.stop)
 	})
+}
+
+// WaitFlush blocks until the cache has been flushed and reports how that went.
+//
+// The /-/shutdown handler waits on this so the post step learns whether the
+// upload actually finished. It cannot simply call http.Server.Shutdown itself:
+// that waits for in-flight requests, and the shutdown request is one of them.
+func (d *Daemon) WaitFlush(ctx context.Context) error {
+	select {
+	case <-d.flushed:
+		return d.flushErr
+	case <-ctx.Done():
+		return fmt.Errorf("wait for flush: %w", ctx.Err())
+	}
 }
 
 // Run serves until Stop, a signal, ctx cancellation or MaxLifetime, then drains
@@ -158,6 +175,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 func (d *Daemon) shutdown(ctx context.Context) error {
+	// Flush first, then release anyone waiting on /-/shutdown, and only then
+	// drain. Draining first would deadlock against the shutdown request itself,
+	// and Cache.Flush refuses to index anything new from here on, so a request
+	// that lands during the flush cannot leave the index pointing at bytes that
+	// never made it into the blob.
+	d.flushErr = d.server.cache.Flush(ctx)
+	close(d.flushed)
+
 	drainCtx, cancel := context.WithTimeout(ctx, drainTimeout)
 	defer cancel()
 
@@ -165,8 +190,8 @@ func (d *Daemon) shutdown(ctx context.Context) error {
 		d.logger.Warnf("drain module proxy: %v", err)
 	}
 
-	if err := d.server.cache.Flush(ctx); err != nil {
-		return fmt.Errorf("flush module cache: %w", err)
+	if d.flushErr != nil {
+		return fmt.Errorf("flush module cache: %w", d.flushErr)
 	}
 
 	return nil
