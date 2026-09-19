@@ -245,6 +245,12 @@ jobs:
           GOCICA_BIN: ${{ github.workspace }}/${{ env.APP_NAME }}
           USE_GOCICA: '1'
           CGO_ENABLED: '0'
+          # Every repetition is a different commit as far as the cache is
+          # concerned, so gocica publishes its result the way it would in a real
+          # repository. Without this they all share the workflow's SHA, the
+          # second one onwards is refused with a 409, and gocica never pays the
+          # upload that setup-go pays on every key change.
+          GOCICA_GITHUB_SHA: ${{ github.sha }}-${{ matrix.entry.ref }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
