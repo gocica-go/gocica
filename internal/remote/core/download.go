@@ -121,9 +121,25 @@ const maxChunkSize = 4 * (1 << 20)
 // ref: https://github.com/golang/go/issues/46279
 const openFileLimit = 100000
 
-func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
+// DownloadAllOutputBlocks writes every output of the blob through
+// objectWriterFunc, coalescing neighbouring outputs into chunked reads.
+//
+// skip, when non-nil, reports outputs that are already available locally. Their
+// bytes are stepped over rather than transferred, which is what keeps the proxy
+// daemon's prewarm from being undone by the next process downloading the same
+// blob again. A skipped output ends the chunk it falls in, since a chunk is one
+// contiguous read.
+func (d *Downloader) DownloadAllOutputBlocks(
+	ctx context.Context,
+	objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error),
+	skip func(objectID string) bool,
+) error {
 	if d.client == nil {
 		return nil
+	}
+
+	if skip == nil {
+		skip = func(string) bool { return false }
 	}
 
 	outputs := d.header.Outputs
@@ -136,12 +152,20 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 	s := semaphore.NewWeighted(openFileLimit)
 	offset := d.headerSize
 	for i := 0; i < len(outputs); {
+		for i < len(outputs) && skip(outputs[i].Id) {
+			offset += outputs[i].Size
+			i++
+		}
+		if i >= len(outputs) {
+			break
+		}
+
 		d.logger.Debugf("creating chunk: %d", i)
 		chunkOffset := offset
 		chunkSize := int64(0)
 		chunkWriters := []myio.WriterWithSize{}
 		chunkCloseFuncs := []func() error{}
-		for ; i < len(outputs) && chunkSize < maxChunkSize; i++ {
+		for ; i < len(outputs) && chunkSize < maxChunkSize && !skip(outputs[i].Id); i++ {
 			output := outputs[i]
 			offset += output.Size
 			chunkSize += output.Size

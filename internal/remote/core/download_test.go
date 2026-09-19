@@ -618,7 +618,7 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 				w := &mockWriteCloser{}
 				writers[objectID] = w
 				return w, nil
-			})
+			}, nil)
 
 			if tt.expectError {
 				if err == nil {

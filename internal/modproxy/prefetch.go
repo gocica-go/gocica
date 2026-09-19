@@ -30,6 +30,14 @@ func (c *Cache) bulkPrefetch(ctx context.Context, objectIDs []string) error {
 	var fetched int64
 	err := c.downloader.DownloadAllOutputBlocks(ctx, func(_ context.Context, objectID string) (io.WriteCloser, error) {
 		return c.newVerifyingWriter(objectID, &fetched)
+	}, func(objectID string) bool {
+		// Already served from disk this run, or left by an earlier one.
+		if !c.store.Has(objectID) {
+			return false
+		}
+		c.donePending(objectID)
+
+		return true
 	})
 	if err != nil {
 		return fmt.Errorf("download output blocks: %w", err)

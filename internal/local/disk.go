@@ -97,6 +97,17 @@ func (d *Disk) Get(_ context.Context, outputID string) (diskPath string, err err
 	return d.objectFilePath(outputID), nil
 }
 
+// Has reports whether the object is on disk. Objects only ever appear under
+// their final name by rename, so anything present is complete.
+//
+// It deliberately does not take the per-object lock: the caller asking is often
+// the one holding it.
+func (d *Disk) Has(_ context.Context, outputID string) bool {
+	_, err := os.Stat(d.objectFilePath(outputID))
+
+	return err == nil
+}
+
 var ErrSizeMismatch = errors.New("size mismatch")
 
 func (d *Disk) Put(_ context.Context, outputID string, _ int64) (string, io.WriteCloser, error) {

@@ -32,6 +32,9 @@ func PrewarmLocal(ctx context.Context, logger log.Logger, downloader *Downloader
 		}
 
 		return w, nil
+	}, func(objectID string) bool {
+		// Another process in the same job may have put it there already.
+		return localBackend.Has(ctx, objectID)
 	})
 	if err != nil {
 		return fmt.Errorf("download all output blocks: %w", err)
