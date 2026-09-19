@@ -40,6 +40,7 @@ type serveCmd struct {
 	MaxLifetime     time.Duration `kong:"default='6h',help='Exit after this long, so an orphaned daemon cannot outlive its job.',env='GOCICA_MODULE_PROXY_MAX_LIFETIME'"`
 	ExportGithubEnv bool          `kong:"name='export-github-env',help='Append GOPROXY to $GITHUB_ENV once listening.',env='GOCICA_MODULE_PROXY_EXPORT_GITHUB_ENV'"`
 	StateFile       string        `kong:"help='Where to record the URL and pid. Defaults to <dir>/mod/proxy.json.',env='GOCICA_MODULE_PROXY_STATE_FILE'"`
+	Prefetch        int           `kong:"default='24',help='How many cached modules to pull from the remote at once on startup. 0 uses the default, a negative value disables prefetching.',env='GOCICA_MODULE_PROXY_PREFETCH'"`
 }
 
 // proxyStopCmd asks a running daemon to flush and exit.
@@ -233,9 +234,10 @@ func runServe(logger log.Logger) error {
 		ctx,
 		logger,
 		modproxy.DaemonConfig{
-			Addr:        CLI.Serve.Addr,
-			StateFile:   moduleStateFile(CLI.Serve.StateFile),
-			MaxLifetime: CLI.Serve.MaxLifetime,
+			Addr:                CLI.Serve.Addr,
+			StateFile:           moduleStateFile(CLI.Serve.StateFile),
+			MaxLifetime:         CLI.Serve.MaxLifetime,
+			PrefetchConcurrency: CLI.Serve.Prefetch,
 		},
 		upstream,
 		modproxy.StoreDir(dir),

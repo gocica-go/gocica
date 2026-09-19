@@ -38,6 +38,10 @@ type DaemonConfig struct {
 	StateFile string
 	// MaxLifetime makes an orphaned daemon exit on its own. Zero disables it.
 	MaxLifetime time.Duration
+	// PrefetchConcurrency is how many objects to pull out of the remote blob at
+	// once at startup. Zero uses the default; a negative value disables
+	// prefetching.
+	PrefetchConcurrency int
 }
 
 // State is the contents of the state file.
@@ -55,6 +59,7 @@ type Daemon struct {
 	httpSrv   *http.Server
 	stateFile string
 	lifetime  time.Duration
+	prefetch  int
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -83,6 +88,7 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 		listener:  listener,
 		stateFile: config.StateFile,
 		lifetime:  config.MaxLifetime,
+		prefetch:  config.PrefetchConcurrency,
 		stop:      make(chan struct{}),
 		flushed:   make(chan struct{}),
 	}
@@ -157,6 +163,21 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	d.logger.Infof("module proxy listening on %s", d.URL())
+
+	// Warm the store while the go command is still starting up. Requests that
+	// arrive meanwhile join the same transfers. It is cancelled on shutdown so it
+	// cannot compete with the flush for bandwidth.
+	if d.prefetch >= 0 {
+		prefetchCtx, cancelPrefetch := context.WithCancel(ctx)
+		defer cancelPrefetch()
+		go func() {
+			d.server.cache.Prefetch(prefetchCtx, d.prefetch)
+		}()
+		go func() {
+			<-d.stop
+			cancelPrefetch()
+		}()
+	}
 
 	select {
 	case err := <-serveErr:

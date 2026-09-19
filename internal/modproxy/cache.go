@@ -22,6 +22,17 @@ import (
 // Without it the module blob only ever grows.
 const entryRetention = 7 * 24 * time.Hour
 
+// DefaultPrefetchConcurrency is how many objects are pulled out of the remote
+// blob at once when prefetching.
+//
+// Fetching purely on demand caps out at the go command's own download
+// concurrency, which is a handful of workers. Measured against tailscale, that
+// left a warm `go mod download` at ~34s for a 256 MB module set while
+// actions/setup-go, which restores an already-extracted cache, took 0.1s. The
+// transfer is latency-bound, not bandwidth-bound, so the fix is more of it in
+// flight.
+const DefaultPrefetchConcurrency = 24
+
 var (
 	cacheHitGauge   = metrics.NewGauge("modproxy_cache_hit")
 	remoteFetchGaug = metrics.NewGauge("modproxy_remote_fetch_duration")
@@ -298,6 +309,62 @@ func (c *Cache) forget(path string) {
 	defer c.locker.Unlock()
 
 	delete(c.entries, path)
+}
+
+// Prefetch pulls every indexed object into the local store in the background.
+//
+// Requests that arrive for an object still in flight join its transfer through
+// the same singleflight, so this never duplicates work or races a live request.
+func (c *Cache) Prefetch(ctx context.Context, concurrency int) {
+	if c.downloader == nil {
+		return
+	}
+	if concurrency <= 0 {
+		concurrency = DefaultPrefetchConcurrency
+	}
+
+	objectIDs := c.indexedObjects()
+	if len(objectIDs) == 0 {
+		return
+	}
+
+	c.logger.Infof("prefetching %d module objects with %d workers.", len(objectIDs), concurrency)
+
+	started := time.Now()
+	eg := &errgroup.Group{}
+	eg.SetLimit(concurrency)
+	for _, objectID := range objectIDs {
+		eg.Go(func() error {
+			if ctx.Err() != nil {
+				return nil
+			}
+			c.fetch(ctx, objectID)
+
+			return nil
+		})
+	}
+	_ = eg.Wait()
+
+	c.logger.Infof("prefetched %d module objects in %s.", len(objectIDs), time.Since(started))
+}
+
+func (c *Cache) indexedObjects() []string {
+	c.locker.RLock()
+	defer c.locker.RUnlock()
+
+	seen := make(map[string]struct{}, len(c.entries))
+	objectIDs := make([]string, 0, len(c.entries))
+	for _, entry := range c.entries {
+		if _, ok := seen[entry.OutputId]; ok {
+			continue
+		}
+		seen[entry.OutputId] = struct{}{}
+		if !c.store.Has(entry.OutputId) {
+			objectIDs = append(objectIDs, entry.OutputId)
+		}
+	}
+
+	return objectIDs
 }
 
 // Stored reports how many objects this run added.
