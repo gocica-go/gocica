@@ -38,7 +38,9 @@ phase() {
   return "$status"
 }
 
-if [ "$SCENARIO" != "setupgo" ]; then
+case "$SCENARIO" in
+setupgo*) ;;
+*)
   # setup-go deliberately restored its cache in this job; everyone else starts
   # from an empty one so the runner image cannot skew the result.
   #
@@ -46,7 +48,8 @@ if [ "$SCENARIO" != "setupgo" ]; then
   # fail on a runner where something else already touched it. The phase records
   # its status either way.
   phase clean go clean -cache -modcache || true
-fi
+  ;;
+esac
 
 if [ "$USE_GOCICA" = "1" ]; then
   : "${GOCICA_BIN:?GOCICA_BIN is required when USE_GOCICA=1}"

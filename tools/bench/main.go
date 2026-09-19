@@ -195,8 +195,8 @@ func writeWallTable(out *strings.Builder, jobs []job, baseline string) {
 		return
 	}
 
-	baseMedian := func(cold bool) float64 {
-		v, ok := grouped[wallKey{scenario: baseline, cold: cold}]
+	baseMedian := func(scenario string, cold bool) float64 {
+		v, ok := grouped[wallKey{scenario: baselineFor(scenario, baseline), cold: cold}]
 		if !ok {
 			return math.NaN()
 		}
@@ -225,13 +225,29 @@ func writeWallTable(out *strings.Builder, jobs []job, baseline string) {
 			state = "cold"
 		}
 		delta := "-"
-		if base := baseMedian(k.cold); !math.IsNaN(base) && base != 0 {
+		if base := baseMedian(k.scenario, k.cold); !math.IsNaN(base) && base != 0 {
 			delta = fmt.Sprintf("%+.1f%%", (m-base)/base*100)
 		}
 		fmt.Fprintf(out, "| %s | %s | %d | %.2f | %s |\n", k.scenario, state, len(v), m, delta)
 	}
 	fmt.Fprintln(out)
 }
+
+// baselineFor pairs a scenario with the baseline measured under the same
+// conditions: a "-dep" scenario belongs against the "-dep" baseline, not against
+// the one whose go.sum never changed.
+func baselineFor(scenario, baseline string) string {
+	if suffix, ok := strings.CutPrefix(scenario, baseline); ok && suffix == "" {
+		return baseline
+	}
+	if strings.HasSuffix(scenario, depSuffix) {
+		return baseline + depSuffix
+	}
+
+	return baseline
+}
+
+const depSuffix = "-dep"
 
 // scenarioOf pulls the scenario and repetition out of a matrix job name such as
 // "measure (gocica, 3)".
