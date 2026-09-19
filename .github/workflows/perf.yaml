@@ -35,12 +35,6 @@ on:
         required: false
         type: boolean
         default: false
-  # Temporary, for the measure-fix-measure loop on this branch: workflow_dispatch
-  # only works for workflows that exist on the default branch. Remove before
-  # merging.
-  push:
-    branches:
-      - feat/goproxy
 
 permissions:
   actions: write
@@ -49,15 +43,13 @@ permissions:
 env:
   APP_NAME: gocica
   GO_VERSION: '1.25.3'
-  # Defaults repeated here so the push trigger, which carries no inputs, still
-  # measures the same thing.
+  # Defaults repeated here so a dispatch with blank inputs still measures the
+  # same thing.
   TARGET_REPO: ${{ github.event.inputs.target-repo || 'tailscale/tailscale' }}
   TARGET_REF: ${{ github.event.inputs.target-ref || 'v1.84.0' }}
   DEP_REFS: ${{ github.event.inputs.dep-refs || 'v1.86.0,v1.88.0,v1.90.0' }}
   BUILD_CMD: ${{ github.event.inputs.build-cmd || 'go build ./cmd/...' }}
-  # Temporarily 5 so a push measures something conclusive; goes back to 3 with
-  # the push trigger.
-  REPS: ${{ github.event.inputs.reps || '5' }}
+  REPS: ${{ github.event.inputs.reps || '3' }}
   # Keep the toolchain out of the measurement: a `toolchain` directive would make
   # the go command download ~70 MB through GOPROXY and swamp everything else.
   GOTOOLCHAIN: local
