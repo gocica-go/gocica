@@ -23,6 +23,12 @@ on:
         description: 'Repetitions per scenario (rep 0 is the cold run): 3 to iterate, 10 to confirm'
         required: false
         default: '3'
+  # Temporary, for the measure-fix-measure loop on this branch: workflow_dispatch
+  # only works for workflows that exist on the default branch. Remove before
+  # merging.
+  push:
+    branches:
+      - feat/goproxy
 
 permissions:
   actions: write
@@ -31,6 +37,12 @@ permissions:
 env:
   APP_NAME: gocica
   GO_VERSION: '1.24.1'
+  # Defaults repeated here so the push trigger, which carries no inputs, still
+  # measures the same thing.
+  TARGET_REPO: ${{ github.event.inputs.target-repo || 'tailscale/tailscale' }}
+  TARGET_REF: ${{ github.event.inputs.target-ref || 'v1.84.0' }}
+  BUILD_CMD: ${{ github.event.inputs.build-cmd || 'go build ./cmd/...' }}
+  REPS: ${{ github.event.inputs.reps || '3' }}
   # Keep the toolchain out of the measurement: a `toolchain` directive would make
   # the go command download ~70 MB through GOPROXY and swamp everything else.
   GOTOOLCHAIN: local
@@ -61,7 +73,7 @@ jobs:
           print("reps=" + json.dumps(list(range(reps))))
           PY
         env:
-          REPS: ${{ github.event.inputs.reps }}
+          REPS: ${{ env.REPS }}
 
   # Scenarios run one after another, and one repetition at a time, so that each
   # job sees a deterministic cache state: rep 0 is cold, the rest are warm.
@@ -87,8 +99,8 @@ jobs:
             await script({ github, context, prefixes: ['gocica-cache-', 'gocica-mod-'] })
       - uses: actions/checkout@v6
         with:
-          repository: ${{ github.event.inputs.target-repo }}
-          ref: ${{ github.event.inputs.target-ref }}
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           path: target
       - uses: actions/setup-go@v6
         with:
@@ -109,7 +121,7 @@ jobs:
         env:
           SCENARIO: gocica
           REP: ${{ matrix.rep }}
-          BUILD_CMD: ${{ github.event.inputs.build-cmd }}
+          BUILD_CMD: ${{ env.BUILD_CMD }}
           GOCICA_BIN: ${{ github.workspace }}/${{ env.APP_NAME }}
           USE_GOCICA: '1'
           CGO_ENABLED: '0'
@@ -141,8 +153,8 @@ jobs:
             await script({ github, context, prefixes: ['setup-go-'] })
       - uses: actions/checkout@v6
         with:
-          repository: ${{ github.event.inputs.target-repo }}
-          ref: ${{ github.event.inputs.target-ref }}
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           path: target
       - uses: actions/setup-go@v6
         with:
@@ -155,7 +167,7 @@ jobs:
         env:
           SCENARIO: setupgo
           REP: ${{ matrix.rep }}
-          BUILD_CMD: ${{ github.event.inputs.build-cmd }}
+          BUILD_CMD: ${{ env.BUILD_CMD }}
           CGO_ENABLED: '0'
       - uses: actions/upload-artifact@v7
         if: always()
@@ -178,8 +190,8 @@ jobs:
           path: gocica-src
       - uses: actions/checkout@v6
         with:
-          repository: ${{ github.event.inputs.target-repo }}
-          ref: ${{ github.event.inputs.target-ref }}
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
           path: target
       - uses: actions/setup-go@v6
         with:
@@ -191,7 +203,7 @@ jobs:
         env:
           SCENARIO: nocache
           REP: ${{ matrix.rep }}
-          BUILD_CMD: ${{ github.event.inputs.build-cmd }}
+          BUILD_CMD: ${{ env.BUILD_CMD }}
           CGO_ENABLED: '0'
       - uses: actions/upload-artifact@v7
         if: always()
