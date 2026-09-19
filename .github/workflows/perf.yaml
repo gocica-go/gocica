@@ -47,7 +47,9 @@ env:
   TARGET_REPO: ${{ github.event.inputs.target-repo || 'tailscale/tailscale' }}
   TARGET_REF: ${{ github.event.inputs.target-ref || 'v1.84.0' }}
   BUILD_CMD: ${{ github.event.inputs.build-cmd || 'go build ./cmd/...' }}
-  REPS: ${{ github.event.inputs.reps || '3' }}
+  # Temporarily 10 for the confirmation run; 3 is the iteration default. Goes
+  # back with the push trigger.
+  REPS: ${{ github.event.inputs.reps || '10' }}
   # Keep the toolchain out of the measurement: a `toolchain` directive would make
   # the go command download ~70 MB through GOPROXY and swamp everything else.
   GOTOOLCHAIN: local
