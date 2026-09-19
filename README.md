@@ -60,3 +60,29 @@ environment variable.
   plain HTTP proxy, so the network boundary is the only access control there is.
   On a GitHub-hosted runner that boundary is the job; on a shared self-hosted
   runner, anything else on the machine can read the cache.
+
+## Performance
+
+Measured by `.github/workflows/perf.yaml` against `tailscale/tailscale`,
+`go build ./cmd/...`, on `ubuntu-latest`. The number is the job's wall time, not
+the build command: GoCICa starts before the go command and flushes after it, and
+`actions/setup-go` restores and saves in its own steps, so timing only `go build`
+hides both.
+
+| | GoCICa | setup-go cache |
+|---|--:|--:|
+| cold | 192s | 178s |
+| warm | 45s | 40s |
+| warm, one dependency changed | **124s** | 203s |
+
+Unchanged dependencies are a wash, and the reason is worth knowing: GoCICa has no
+cache-restore step at all, where `setup-go` spends ~22s on one, and it hands that
+back extracting module zips, which `setup-go` avoids by caching the
+already-extracted tree.
+
+The gap opens when a dependency moves. `setup-go`'s cache key is the hash of
+`go.sum` and it has no restore keys, so a single changed module throws away the
+module cache and the build cache together. GoCICa's restore key chain still finds
+the previous blob: walking tailscale v1.84.0 -> v1.86.0 -> v1.88.0 -> v1.90.0 it
+refetched 48, 67 and a handful of modules out of ~1500, and kept most of its
+build cache — 92s of build against 167s.
