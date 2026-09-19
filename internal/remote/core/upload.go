@@ -29,11 +29,11 @@ var compressGauge = metrics.NewGauge("blob_compress_latency")
 // DefaultCompressionPolicy.
 //
 // Deliberately low. The threshold was written as 100*(2^10), which is XOR in Go
-// and so meant 800 bytes rather than the intended 100 KiB. Correcting it to
-// 100 KiB grew the build cache blob for tailscale from 91 MB to 450 MB -- zstd
-// at level 1 takes roughly 5x off compiled objects, and almost all of them fall
-// between those two sizes. On a CI link that transfer costs far more than the
-// compression does, so the accident was right and the intent was wrong.
+// and so meant 800 bytes rather than the intended 100 KiB. Measured on
+// tailscale's build cache, 100 KiB produced a 450 MB blob and 1 KiB a 434 MB
+// one: the objects in between are few but not free, and zstd at level 1 costs
+// little next to moving them over a CI link. So the low threshold the typo
+// happened to produce is kept, on purpose this time.
 const compressThresholdBytes = 1 << 10
 
 // CompressionPolicy reports whether an output should be zstd-compressed.
