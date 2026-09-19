@@ -1,0 +1,8 @@
+name: gocica
+version: 0.1.0
+description: APM package for GoCICa
+
+dependencies:
+  apm:
+    - mazrean/apm-plackage/common
+    - mazrean/apm-plackage/go

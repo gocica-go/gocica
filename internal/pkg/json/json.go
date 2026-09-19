@@ -22,7 +22,7 @@ func NewDecoder(r io.Reader) *Decoder {
 }
 
 // Decode decodes JSON data into the provided interface
-func (d *Decoder) Decode(v interface{}) error {
+func (d *Decoder) Decode(v any) error {
 	return d.dec.Decode(v)
 }
 
@@ -47,7 +47,7 @@ func NewEncoder(w io.Writer) *Encoder {
 // Encode encodes the provided interface into JSON format
 // It automatically appends a newline after each encoding for better readability
 // and compatibility with streaming protocols that expect line-delimited JSON
-func (e *Encoder) Encode(v interface{}) error {
+func (e *Encoder) Encode(v any) error {
 	if err := e.enc.Encode(v); err != nil {
 		return err
 	}

@@ -25,7 +25,7 @@ func (scr *SkipCharReader) Read(p []byte) (int, error) {
 		tmp := make([]byte, 1024)
 		n, err := scr.r.Read(tmp)
 		if n > 0 {
-			for i := 0; i < n; i++ {
+			for i := range n {
 				if tmp[i] == scr.skip {
 					continue
 				}

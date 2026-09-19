@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/DataDog/zstd"
@@ -22,8 +23,8 @@ type mockDownloadClient struct {
 }
 
 func (m *mockDownloadClient) GetURL(context.Context) string {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "GetURL" {
 			if url, ok := call.result[0].(string); ok {
 				return url
@@ -34,8 +35,8 @@ func (m *mockDownloadClient) GetURL(context.Context) string {
 }
 
 func (m *mockDownloadClient) DownloadBlock(_ context.Context, offset int64, size int64, w io.Writer) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "DownloadBlock" {
 			expectedOffset, ok1 := call.args[1].(int64)
 			expectedSize, ok2 := call.args[2].(int64)
@@ -58,8 +59,8 @@ func (m *mockDownloadClient) DownloadBlock(_ context.Context, offset int64, size
 }
 
 func (m *mockDownloadClient) DownloadBlockBuffer(_ context.Context, offset int64, size int64, buf []byte) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "DownloadBlockBuffer" {
 			expectedOffset, ok1 := call.args[1].(int64)
 			expectedSize, ok2 := call.args[2].(int64)
@@ -182,7 +183,6 @@ func TestNewDownloader(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -288,7 +288,6 @@ func TestDownloader_GetEntries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -368,7 +367,6 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -584,7 +582,6 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 

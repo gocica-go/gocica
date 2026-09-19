@@ -32,8 +32,8 @@ type mockUploadClient struct {
 }
 
 func (m *mockUploadClient) UploadBlock(_ context.Context, blobID string, _ io.ReadSeekCloser) (int64, error) {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "UploadBlock" {
 			if call.args[0] == nil {
 				size, ok := call.result[0].(int64)
@@ -63,8 +63,8 @@ func (m *mockUploadClient) UploadBlock(_ context.Context, blobID string, _ io.Re
 }
 
 func (m *mockUploadClient) UploadBlockFromURL(_ context.Context, _, url string, offset, size int64) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "UploadBlockFromURL" {
 			if len(call.args) < 4 {
 				continue
@@ -93,8 +93,8 @@ func (m *mockUploadClient) UploadBlockFromURL(_ context.Context, _, url string, 
 }
 
 func (m *mockUploadClient) Commit(_ context.Context, _ []string, _ int64) error {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "Commit" {
 			if call.result[0] == nil {
 				return nil
@@ -144,8 +144,8 @@ type mockBaseBlobProvider struct {
 }
 
 func (m *mockBaseBlobProvider) IsEmpty() bool {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "IsEmpty" {
 			if call.result[0] == nil {
 				return true
@@ -159,8 +159,8 @@ func (m *mockBaseBlobProvider) IsEmpty() bool {
 }
 
 func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) ([]*v1.ActionsOutput, error) {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "DownloadOutputs" {
 			outputs := []*v1.ActionsOutput{}
 			if call.result[0] != nil {
@@ -180,8 +180,8 @@ func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) ([]*v1.ActionsOutpu
 }
 
 func (m *mockBaseBlobProvider) GetOutputBlockURL(_ context.Context) (string, int64, int64, error) {
-	for i := len(m.calls) - 1; i >= 0; i-- {
-		call := m.calls[i]
+	for _, call := range slices.Backward(m.calls) {
+
 		if call.method == "GetOutputBlockURL" {
 			if call.result[3] == nil {
 				url, ok1 := call.result[0].(string)
@@ -385,7 +385,6 @@ func TestUploader_UploadOutput(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -512,7 +511,6 @@ func TestUploader_Commit(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -609,7 +607,6 @@ func TestUploader_createHeader(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -845,7 +842,6 @@ func TestUploader_constructOutputs(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 

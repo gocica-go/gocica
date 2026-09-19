@@ -7,3 +7,9 @@
 /.serena/cache
 /.codex
 !/.codex/config.toml
+
+
+# APM dependencies
+apm_modules/
+.mcp.json
+.claude

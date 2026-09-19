@@ -39,10 +39,7 @@ func (j *JoinedWriter) Write(p []byte) (n int, err error) {
 		}
 
 		// determine the size to write
-		writeSize := int64(len(remaining))
-		if writeSize > writer.Size {
-			writeSize = writer.Size
-		}
+		writeSize := min(int64(len(remaining)), writer.Size)
 
 		// execute the actual write
 		written, writeErr := writer.Writer.Write(remaining[:writeSize])
