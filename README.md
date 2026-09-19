@@ -65,24 +65,27 @@ environment variable.
 
 Measured by `.github/workflows/perf.yaml` against `tailscale/tailscale`,
 `go build ./cmd/...`, on `ubuntu-latest`. The number is the job's wall time, not
-the build command: GoCICa starts before the go command and flushes after it, and
+the build command: GoCICa warms its caches before the go command starts, and
 `actions/setup-go` restores and saves in its own steps, so timing only `go build`
 hides both.
 
 | | GoCICa | setup-go cache |
 |---|--:|--:|
-| cold | 192s | 178s |
-| warm | 45s | 40s |
-| warm, one dependency changed | **124s** | 203s |
+| cold | 189s | 182s |
+| warm | 42s | 44s |
+| warm, one dependency changed | **149s** | 201s |
 
-Unchanged dependencies are a wash, and the reason is worth knowing: GoCICa has no
-cache-restore step at all, where `setup-go` spends ~22s on one, and it hands that
-back extracting module zips, which `setup-go` avoids by caching the
-already-extracted tree.
+**Warm runs are a wash, and the reason is structural.** GoCICa has no
+cache-restore step, where `setup-go` spends around 22s on one; it spends about
+the same warming its own caches before the go command starts. Roughly 1.4 GB has
+to reach the disk either way, and that is the floor. Repetitions of the same
+measurement span 37-48s against 38-50s, so treat any single warm comparison as
+a tie.
 
-The gap opens when a dependency moves. `setup-go`'s cache key is the hash of
-`go.sum` and it has no restore keys, so a single changed module throws away the
-module cache and the build cache together. GoCICa's restore key chain still finds
-the previous blob: walking tailscale v1.84.0 -> v1.86.0 -> v1.88.0 -> v1.90.0 it
-refetched 48, 67 and a handful of modules out of ~1500, and kept most of its
-build cache — 92s of build against 167s.
+**A changed dependency is a different matter.** `setup-go`'s cache key is the
+hash of `go.sum` and it has no restore keys, so one moved module throws away the
+module cache and the build cache together: it refetched and re-extracted every
+module (19.4s against 2.5s) and rebuilt from nothing (156s against 119s).
+GoCICa's restore key chain still finds the previous blob and fetches only what
+moved -- walking tailscale v1.84.0 to v1.86.0 to v1.88.0, 48 and 67 modules out
+of about 1500.

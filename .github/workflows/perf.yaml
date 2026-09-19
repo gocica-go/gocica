@@ -5,11 +5,6 @@
 name: Performance
 
 on:
-  # Temporary again for one experiment: workflow_dispatch only reaches workflows
-  # that already live on the default branch.
-  push:
-    branches:
-      - feat/goproxy
   workflow_dispatch:
     inputs:
       target-repo:
@@ -54,7 +49,7 @@ env:
   TARGET_REF: ${{ github.event.inputs.target-ref || 'v1.84.0' }}
   DEP_REFS: ${{ github.event.inputs.dep-refs || 'v1.86.0,v1.88.0' }}
   BUILD_CMD: ${{ github.event.inputs.build-cmd || 'go build ./cmd/...' }}
-  REPS: ${{ github.event.inputs.reps || '5' }}
+  REPS: ${{ github.event.inputs.reps || '3' }}
   # Keep the toolchain out of the measurement: a `toolchain` directive would make
   # the go command download ~70 MB through GOPROXY and swamp everything else.
   GOTOOLCHAIN: local
