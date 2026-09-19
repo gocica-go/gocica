@@ -6,6 +6,8 @@ import (
 	"github.com/mazrean/gocica/internal/pkg/io"
 )
 
+//go:generate go tool github.com/mazrean/odjson -type Request,Response
+
 // Cmd is a command that can be issued to a process.
 //
 // If the interface needs to grow, we can add new commands
@@ -31,13 +33,13 @@ type Request struct {
 	Command Cmd
 
 	// ActionID is used for identifying specific cache operations.
-	ActionID string `json:",omitempty"`
+	ActionID string `json:",omitzero"`
 
 	// OutputID specifies the expected format or version of the output.
-	OutputID string `json:",omitempty"`
+	OutputID string `json:",omitzero"`
 
 	// BodySize is the number of bytes of Body. If zero, the body isn't written.
-	BodySize int64 `json:",omitempty"`
+	BodySize int64 `json:",omitzero"`
 
 	// Body is the request payload for operations like "put".
 	// It's sent separately from the JSON object so large values
@@ -58,25 +60,25 @@ type Response struct {
 	ID int64
 
 	// Err contains the error message if the operation failed
-	Err string `json:",omitempty"`
+	Err string `json:",omitzero"`
 
 	// KnownCommands is included in the first message on startup (with ID==0).
 	// It lists the Request.Command types that are supported.
 	// This enables graceful protocol extension over time.
-	KnownCommands []Cmd `json:",omitempty"`
+	KnownCommands []Cmd `json:",omitzero"`
 
 	// Miss indicates a cache miss when true
-	Miss bool `json:",omitempty"`
+	Miss bool `json:",omitzero"`
 
 	// OutputID identifies the format/version of the response
-	OutputID string `json:",omitempty"`
+	OutputID string `json:",omitzero"`
 
 	// Size is the total size of the response data in bytes
-	Size int64 `json:",omitempty"`
+	Size int64 `json:",omitzero"`
 
 	// TimeNanos is the operation processing time in nanoseconds
-	TimeNanos int64 `json:",omitempty"`
+	TimeNanos int64 `json:",omitzero"`
 
 	// DiskPath is the absolute path on disk where the data is stored
-	DiskPath string `json:",omitempty"`
+	DiskPath string `json:",omitzero"`
 }

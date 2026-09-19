@@ -10,7 +10,7 @@ entries from a local disk store backed by GitHub Actions Cache.
 - Test single: `go test ./internal/local -run TestXxx -v`
 - Lint: `go tool lint ./... ./tools/...`
 - Format: `gofmt -l .` must print nothing (CI fails on any output)
-- Generate: `go generate ./...` (buf → `internal/proto`, kessoku → `internal/kessoku`)
+- Generate: `go generate ./...` (buf → `internal/proto`, kessoku → `internal/kessoku`, odjson → `protocol/odjson_gen.go`)
 
 ## Tech Stack
 
@@ -19,7 +19,7 @@ entries from a local disk store backed by GitHub Actions Cache.
 - DI: `mazrean/kessoku` (compile-time, `internal/kessoku`)
 - Protobuf: `buf` + `protoc-gen-go` for the cache index / metadata format
 - Remote: GitHub Actions Cache API; blobs move over Azure Blob SAS URLs the API hands back
-- JSON: `bytedance/sonic`; compression: `DataDog/zstd` (forked to `gocica-go/zstd`)
+- JSON: `encoding/json/v2` + `encoding/jsontext`, accelerated by `mazrean/odjson` codegen; compression: `DataDog/zstd` (forked to `gocica-go/zstd`)
 
 ## Project Structure
 
@@ -44,12 +44,12 @@ specs/                # feature specs (spec-driven development)
 - Wrap errors with context: `fmt.Errorf("get local cache: %w", err)`. This is the pattern everywhere.
 - The cache sits on the compiler's hot path — avoid per-request allocations and extra syscalls.
 - A remote failure degrades gracefully: `ConbinedBackend` warns and falls back to local-only rather than failing the build. Keep it that way.
-- Generated files (`internal/proto`, `internal/kessoku/kessoku_band.go`) are regenerated, never edited by hand.
+- Generated files (`internal/proto`, `internal/kessoku/kessoku_band.go`, `protocol/odjson_gen.go`) are regenerated, never edited by hand.
 
 ## Boundaries
 
 - ALWAYS: run `go tool lint ./... ./tools/...` and the tests before calling work complete.
-- ALWAYS: rerun `go generate ./...` after touching `proto/` or a kessoku injector.
+- ALWAYS: rerun `go generate ./...` after touching `proto/`, a kessoku injector, or the `protocol` JSON structs.
 - ASK FIRST: new dependencies, changes to the on-disk cache format, CI workflow edits.
 - NEVER: commit tokens, cache artifacts, `coverage.txt`, or profile output.
 
