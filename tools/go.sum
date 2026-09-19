@@ -148,6 +148,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mazrean/kessoku v1.1.0 h1:Vkv1PaUR/Y8PuOX6tXZh4lmh07b3Cpgzu7J3YS0H01A=
 github.com/mazrean/kessoku v1.1.0/go.mod h1:k6lkm/3MwpAfwUsiec0sEkOfjJ+ci8plcQOeo3mJeQE=
+github.com/mazrean/odjson v0.2.0 h1:IqSxWoIoMjtOFa1rh4BpG2xZTJNz9RJEUIjUjq/YU4w=
+github.com/mazrean/odjson v0.2.0/go.mod h1:+kI7lvSxtvDqvwfmNx5c4WY5AnH+4llM14lEK1yieFc=
 github.com/mitchellh/go-homedir v1.1.0 h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG+4E0Y=
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=

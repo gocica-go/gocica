@@ -5,6 +5,7 @@ go 1.27.1
 tool (
 	github.com/bufbuild/buf/cmd/buf
 	github.com/mazrean/kessoku/cmd/kessoku
+	github.com/mazrean/odjson
 	google.golang.org/protobuf/cmd/protoc-gen-go
 	tools/lint
 )
@@ -65,6 +66,7 @@ require (
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mazrean/kessoku v1.1.0 // indirect
+	github.com/mazrean/odjson v0.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/locker v1.0.1 // indirect

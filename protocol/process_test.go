@@ -296,9 +296,9 @@ func TestProcess_decodeWorker(t *testing.T) {
 	// base64 encoded string of "gocica"
 	const (
 		gocicaBase64    = `"Z29jaWNh"`
-		oneLineGetReq   = `{"id": 1,"command": "get","actionId": "000a7673899170f3adcac947cabf348c041d32330bb3f6ac6f551128c0c7efa2","outputId": "04464d0c070ce0c1954c4d7846890a40597b70c10f9e7c542c30e6a2659abce4"}` + "\n\n"
-		oneLinePutReq   = `{"id": 2,"command": "put","actionId": "000a7673899170f3adcac947cabf348c041d32330bb3f6ac6f551128c0c7efa2","outputId": "0464d0c070ce0c1954c4d7846890a40597b70c10f9e7c542c30e6a2659abce42","bodySize": 6}` + "\n\n" + gocicaBase64 + "\n"
-		oneLineCloseReq = `{"id": 3,"command": "close"}` + "\n\n"
+		oneLineGetReq   = `{"ID": 1,"Command": "get","ActionID": "000a7673899170f3adcac947cabf348c041d32330bb3f6ac6f551128c0c7efa2","OutputID": "04464d0c070ce0c1954c4d7846890a40597b70c10f9e7c542c30e6a2659abce4"}` + "\n\n"
+		oneLinePutReq   = `{"ID": 2,"Command": "put","ActionID": "000a7673899170f3adcac947cabf348c041d32330bb3f6ac6f551128c0c7efa2","OutputID": "0464d0c070ce0c1954c4d7846890a40597b70c10f9e7c542c30e6a2659abce42","BodySize": 6}` + "\n\n" + gocicaBase64 + "\n"
+		oneLineCloseReq = `{"ID": 3,"Command": "close"}` + "\n\n"
 	)
 	var (
 		getReqValue = &Request{
@@ -356,10 +356,9 @@ func TestProcess_decodeWorker(t *testing.T) {
 			expectRequests: []*Request{putReqValue, getReqValue},
 		},
 		{
-			name:  "invalid json",
-			input: `{"id":1,command":"get"}`,
-			// from sonic v1.14, no error occurs for invalid JSON.
-			wantErr: false,
+			name:    "invalid json",
+			input:   `{"ID":1,Command":"get"}`,
+			wantErr: true,
 		},
 		{
 			name:      "handler error",
