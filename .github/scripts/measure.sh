@@ -19,9 +19,11 @@ mkdir -p "$METRICS_DIR"
 METRICS="$METRICS_DIR/$SCENARIO-$REP.jsonl"
 : > "$METRICS"
 
+# The wall-clock start lets a phase be lined up against the daemon's log and
+# metrics, which carry their own timestamps.
 record() {
-  printf '{"scenario":"%s","rep":%s,"phase":"%s","ns":%s,"status":%s}\n' \
-    "$SCENARIO" "$REP" "$1" "$2" "$3" >> "$METRICS"
+  printf '{"scenario":"%s","rep":%s,"phase":"%s","ns":%s,"status":%s,"start_ns":%s}\n' \
+    "$SCENARIO" "$REP" "$1" "$2" "$3" "$4" >> "$METRICS"
 }
 
 phase() {
@@ -33,9 +35,24 @@ phase() {
   "$@" || status=$?
   end=$(date +%s%N)
 
-  record "$name" "$((end - start))" "$status"
+  record "$name" "$((end - start))" "$status" "$start"
 
   return "$status"
+}
+
+# GOCICA_PROFILE=true records the dev build's metrics and profiles next to the
+# timings. It is off while measuring wall time: the 100ms sampler and the
+# profilers are not free.
+PROFILE="${GOCICA_PROFILE:-false}"
+dev_flags() {
+  local name="$1"
+  if [ "$PROFILE" != "true" ]; then
+    return 0
+  fi
+  printf -- '--dev.metrics=%s/%s-metrics-%s-%s.csv --dev.cpu-prof=%s/%s-cpu-%s-%s.pprof --dev.fg-prof=%s/%s-fg-%s-%s.pprof' \
+    "$METRICS_DIR" "$name" "$SCENARIO" "$REP" \
+    "$METRICS_DIR" "$name" "$SCENARIO" "$REP" \
+    "$METRICS_DIR" "$name" "$SCENARIO" "$REP"
 }
 
 case "$SCENARIO" in
@@ -58,7 +75,8 @@ if [ "$USE_GOCICA" = "1" ]; then
   export GOCICA_DIR
 
   start_proxy() {
-    nohup "$GOCICA_BIN" serve --dir="$GOCICA_DIR" > "$METRICS_DIR/proxy-$SCENARIO-$REP.log" 2>&1 &
+    # shellcheck disable=SC2046 # the dev flags are meant to split.
+    nohup "$GOCICA_BIN" serve --dir="$GOCICA_DIR" $(dev_flags proxy) > "$METRICS_DIR/proxy-$SCENARIO-$REP.log" 2>&1 &
 
     local state="$GOCICA_DIR/mod/proxy.json"
     # Waits for readiness, not just liveness: the daemon restores modules into
@@ -102,8 +120,14 @@ fi
 # not the module is already extracted (cmd/go/internal/modcmd/download.go), so a
 # workflow that only builds never pays for the zips at all -- which is where the
 # extracted-module cache actually shows.
+#
+# -x lists every fetch the go command makes ("# get https://..."), so a warm run
+# that should need none can be checked for what it still asked for.
+mod_download() {
+  go mod download -x 2> "$METRICS_DIR/mod-download-$SCENARIO-$REP.log"
+}
 if [ "${BUILD_ONLY:-0}" != "1" ]; then
-  phase mod_download go mod download
+  phase mod_download mod_download
 fi
 
 if [ "$USE_GOCICA" = "1" ]; then
@@ -111,11 +135,15 @@ if [ "$USE_GOCICA" = "1" ]; then
   # build cache, and since one run publishes a single cache entry per key, the
   # first gocica process to upload claims it -- which would leave the build's own
   # output unpublished and make the next warm run look worse than it is.
-  export GOCACHEPROG="$GOCICA_BIN --dir=$GOCICA_DIR"
+  export GOCACHEPROG="$GOCICA_BIN --dir=$GOCICA_DIR $(dev_flags cacheprog)"
 fi
 
-# shellcheck disable=SC2086 # BUILD_CMD is a command line on purpose.
-phase build $BUILD_CMD
+# The cacheprog logs to the build's stderr, so keep a copy next to the timings.
+build() {
+  # shellcheck disable=SC2086 # BUILD_CMD is a command line on purpose.
+  $BUILD_CMD 2> >(tee "$METRICS_DIR/build-$SCENARIO-$REP.log" >&2)
+}
+phase build build
 
 if [ "$USE_GOCICA" = "1" ]; then
   phase flush "$GOCICA_BIN" proxy-stop --dir="$GOCICA_DIR"

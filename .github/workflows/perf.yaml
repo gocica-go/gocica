@@ -35,6 +35,16 @@ on:
         required: false
         type: boolean
         default: false
+      profile:
+        description: Record gocica's dev metrics (CPU, memory, network at 100ms, per-call latencies) and profiles into the metrics artifacts.
+        required: false
+        type: boolean
+        default: false
+      extracted-module-cache:
+        description: Run the module proxy with the extracted-module cache on.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -53,6 +63,8 @@ env:
   # Keep the toolchain out of the measurement: a `toolchain` directive would make
   # the go command download ~70 MB through GOPROXY and swamp everything else.
   GOTOOLCHAIN: local
+  GOCICA_PROFILE: ${{ github.event.inputs.profile || 'false' }}
+  GOCICA_MODULE_PROXY_EXTRACTED_CACHE: ${{ github.event.inputs.extracted-module-cache || 'false' }}
 
 jobs:
   build:
