@@ -5,6 +5,11 @@
 name: Performance
 
 on:
+  # Temporary again for one experiment: workflow_dispatch only reaches workflows
+  # that already live on the default branch.
+  push:
+    branches:
+      - feat/goproxy
   workflow_dispatch:
     inputs:
       target-repo:
@@ -47,9 +52,9 @@ env:
   # same thing.
   TARGET_REPO: ${{ github.event.inputs.target-repo || 'tailscale/tailscale' }}
   TARGET_REF: ${{ github.event.inputs.target-ref || 'v1.84.0' }}
-  DEP_REFS: ${{ github.event.inputs.dep-refs || 'v1.86.0,v1.88.0,v1.90.0' }}
+  DEP_REFS: ${{ github.event.inputs.dep-refs || 'v1.86.0,v1.88.0' }}
   BUILD_CMD: ${{ github.event.inputs.build-cmd || 'go build ./cmd/...' }}
-  REPS: ${{ github.event.inputs.reps || '3' }}
+  REPS: ${{ github.event.inputs.reps || '5' }}
   # Keep the toolchain out of the measurement: a `toolchain` directive would make
   # the go command download ~70 MB through GOPROXY and swamp everything else.
   GOTOOLCHAIN: local
@@ -191,6 +196,58 @@ jobs:
           name: metrics-setupgo-${{ matrix.rep }}
           path: metrics
 
+  # Same caches, same runner generation, one flag different. -modcacherw tells the
+  # go command not to make every extracted file read-only, which is thousands of
+  # chmod calls on a module set this size and pure cost on a runner that is thrown
+  # away. It can only help the side that extracts, so it is measured against the
+  # scenario above rather than against setup-go.
+  gocica_modcacherw:
+    name: measure (gocica-rw, ${{ matrix.rep }})
+    needs: [build, gocica]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        rep: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: gocica-src
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_REF }}
+          path: target
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.APP_NAME }}
+      # ref: https://github.com/actions/download-artifact#permission-loss
+      - name: Fix permissions
+        run: chmod +x ${{ env.APP_NAME }}
+      - name: Expose GitHub Actions runtime environment variables
+        uses: crazy-max/ghaction-github-runtime@v4
+      - name: Measure
+        working-directory: target
+        run: bash "$GITHUB_WORKSPACE/gocica-src/.github/scripts/measure.sh"
+        env:
+          SCENARIO: gocica-rw
+          REP: ${{ matrix.rep }}
+          BUILD_CMD: ${{ env.BUILD_CMD }}
+          GOCICA_BIN: ${{ github.workspace }}/${{ env.APP_NAME }}
+          USE_GOCICA: '1'
+          CGO_ENABLED: '0'
+          GOFLAGS_EXTRA: -modcacherw
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: metrics-gocica-rw-${{ matrix.rep }}
+          path: metrics
+
   # The warm scenarios above measure the best case for actions/setup-go: every
   # repetition sees a byte-identical go.sum. Its cache key is the hash of that
   # file and it has no restore keys, so any dependency change is a total miss.
@@ -199,7 +256,7 @@ jobs:
   # in a repository anyone is working on, and it is what these two measure.
   gocica_depchange:
     name: measure (gocica-dep, ${{ matrix.entry.rep }})
-    needs: [build, gocica]
+    needs: [build, gocica_modcacherw]
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 1
@@ -325,7 +382,7 @@ jobs:
 
   report:
     name: Report
-    needs: [gocica, setupgo, gocica_depchange, setupgo_depchange, nocache]
+    needs: [gocica, gocica_modcacherw, setupgo, gocica_depchange, setupgo_depchange, nocache]
     if: always()
     runs-on: ubuntu-latest
     steps:

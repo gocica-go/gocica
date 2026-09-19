@@ -87,6 +87,11 @@ if [ "$USE_GOCICA" = "1" ]; then
   export GOPROXY="$GOPROXY_URL|https://proxy.golang.org,direct"
 fi
 
+if [ -n "${GOFLAGS_EXTRA:-}" ]; then
+  export GOFLAGS="${GOFLAGS:-} $GOFLAGS_EXTRA"
+  echo "GOFLAGS=$GOFLAGS"
+fi
+
 phase mod_download go mod download
 
 if [ "$USE_GOCICA" = "1" ]; then
