@@ -73,10 +73,10 @@ type Daemon struct {
 	flushed  chan struct{}
 	flushErr error
 
-	// ready closes once the caches are warm. The go command must not start
-	// before then: restoring extracted modules into GOMODCACHE while the go
-	// command is extracting into the same directories is a race, and the point of
-	// restoring them is that the go command never has to extract at all.
+	// ready closes once every cache is warm. The go command must not start before
+	// then, for two reasons: restoring extracted modules into GOMODCACHE while it
+	// is extracting into the same directories is a race, and anything still
+	// transferring competes with the build for the same link.
 	readyOnce sync.Once
 	ready     chan struct{}
 }
@@ -117,14 +117,14 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 	return daemon, nil
 }
 
-// markReady announces that the module cache is warm.
+// markReady announces that everything the go command will need is local.
 func (d *Daemon) markReady() {
 	d.readyOnce.Do(func() {
 		close(d.ready)
 	})
 }
 
-// Ready reports whether the module cache is warm, for the readiness endpoint.
+// Ready reports whether the caches are warm, for the readiness endpoint.
 func (d *Daemon) Ready() bool {
 	select {
 	case <-d.ready:
@@ -224,13 +224,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.server.cache.RestoreTrees(prefetchCtx, d.gomodcache)
 		d.server.cache.RestoreDownloadCache(prefetchCtx, d.gomodcache)
 
-		// The build cache is warmed after the caller has been told the module side
-		// is ready, so `go mod download` does not wait on it.
-		d.markReady()
-
-		// Only now: `go mod download` runs before `go build`, so modules are on the
-		// critical path first. Running both transfers at once simply made the one
-		// that was needed sooner take longer.
+		// The build cache is warmed before the caller is told it can start, not
+		// after. Once the module cache is restored `go mod download` finishes in
+		// well under a second, so anything still transferring lands on top of
+		// `go build` instead: measured, that turned a 1.7s prewarm into 9.7s and
+		// took the build from 12.4s to 23.5s with it. Everything the go command
+		// will need is fetched first, in one queue.
 		if d.afterPrefetch != nil {
 			d.afterPrefetch(prefetchCtx)
 		}
