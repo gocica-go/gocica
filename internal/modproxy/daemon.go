@@ -61,6 +61,9 @@ type Daemon struct {
 	lifetime  time.Duration
 	prefetch  int
 
+	// afterPrefetch runs once the module store is warm. See Run.
+	afterPrefetch func(context.Context)
+
 	stopOnce sync.Once
 	stop     chan struct{}
 	flushed  chan struct{}
@@ -99,6 +102,11 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 	server.SetLifecycle(daemon)
 
 	return daemon, nil
+}
+
+// SetAfterPrefetch installs work to run once the module prefetch has finished.
+func (d *Daemon) SetAfterPrefetch(f func(context.Context)) {
+	d.afterPrefetch = f
 }
 
 // URL is the base URL to put in GOPROXY.
@@ -167,17 +175,25 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Warm the store while the go command is still starting up. Requests that
 	// arrive meanwhile join the same transfers. It is cancelled on shutdown so it
 	// cannot compete with the flush for bandwidth.
-	if d.prefetch >= 0 {
-		prefetchCtx, cancelPrefetch := context.WithCancel(ctx)
-		defer cancelPrefetch()
-		go func() {
+	prefetchCtx, cancelPrefetch := context.WithCancel(ctx)
+	defer cancelPrefetch()
+	go func() {
+		<-d.stop
+		cancelPrefetch()
+	}()
+
+	go func() {
+		if d.prefetch >= 0 {
 			d.server.cache.Prefetch(prefetchCtx, d.prefetch)
-		}()
-		go func() {
-			<-d.stop
-			cancelPrefetch()
-		}()
-	}
+		}
+
+		// Only now: `go mod download` runs before `go build`, so modules are on the
+		// critical path first. Running both transfers at once simply made the one
+		// that was needed sooner take longer.
+		if d.afterPrefetch != nil {
+			d.afterPrefetch(prefetchCtx)
+		}
+	}()
 
 	select {
 	case err := <-serveErr:

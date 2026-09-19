@@ -259,7 +259,9 @@ func runServe(logger log.Logger) error {
 	}
 
 	if CLI.Serve.PrewarmBuild {
-		go prewarmBuildCache(ctx, logger)
+		daemon.SetAfterPrefetch(func(ctx context.Context) {
+			prewarmBuildCache(ctx, logger)
+		})
 	}
 
 	fmt.Printf("{\"url\":%q,\"goproxy\":%q}\n", daemon.URL(), goproxy)
