@@ -70,7 +70,6 @@ func TestGoCommandEndToEnd(t *testing.T) {
 	env := append(os.Environ(),
 		"GOMODCACHE="+modcache,
 		"GOFLAGS=-mod=mod -modcacherw",
-		"GONOSUMDB=*",
 		"GOSUMDB=off",
 		"GOTOOLCHAIN=local",
 		"GOPROXY="+daemon.URL()+"|"+upstream.URL,

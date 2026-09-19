@@ -41,7 +41,11 @@ phase() {
 if [ "$SCENARIO" != "setupgo" ]; then
   # setup-go deliberately restored its cache in this job; everyone else starts
   # from an empty one so the runner image cannot skew the result.
-  phase clean go clean -cache -modcache
+  #
+  # Tolerated on failure: the module cache is written read-only, so a clean can
+  # fail on a runner where something else already touched it. The phase records
+  # its status either way.
+  phase clean go clean -cache -modcache || true
 fi
 
 if [ "$USE_GOCICA" = "1" ]; then

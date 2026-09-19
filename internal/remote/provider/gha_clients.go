@@ -39,7 +39,8 @@ func (c *lazyUploadClient) resolve(ctx context.Context) (core.UploadClient, erro
 		uploadURL, err := c.cacheClient.createCacheEntry(ctx)
 		switch {
 		case errors.Is(err, ErrAlreadyExists):
-			c.logger.Infof("cache entry already exists. skipping upload.")
+			key, _ := c.cacheClient.blobKey()
+			c.logger.Infof("cache entry %q already exists. skipping upload.", key)
 			c.disabled = true
 
 			return
