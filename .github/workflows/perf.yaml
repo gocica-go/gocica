@@ -1,0 +1,222 @@
+# Measures gocica against actions/setup-go's cache on a real repository.
+#
+# Unlike benchmark.yaml this builds gocica from the current ref instead of
+# downloading a release, so an unreleased change can be measured.
+name: Performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      target-repo:
+        description: Repository to build
+        required: false
+        default: tailscale/tailscale
+      target-ref:
+        description: Ref of the target repository
+        required: false
+        default: v1.84.0
+      build-cmd:
+        description: Build command to measure
+        required: false
+        default: go build ./cmd/...
+      reps:
+        description: 'Repetitions per scenario (rep 0 is the cold run): 3 to iterate, 10 to confirm'
+        required: false
+        default: '3'
+
+permissions:
+  actions: write
+  contents: read
+
+env:
+  APP_NAME: gocica
+  GO_VERSION: '1.24.1'
+  # Keep the toolchain out of the measurement: a `toolchain` directive would make
+  # the go command download ~70 MB through GOPROXY and swamp everything else.
+  GOTOOLCHAIN: local
+
+jobs:
+  build:
+    name: Build gocica
+    runs-on: ubuntu-latest
+    outputs:
+      reps: ${{ steps.matrix.outputs.reps }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go build -tags=dev -o ${{ env.APP_NAME }} .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.APP_NAME }}
+          path: ./${{ env.APP_NAME }}
+      - id: matrix
+        name: Build the repetition matrix
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          reps = int(os.environ["REPS"])
+          print("reps=" + json.dumps(list(range(reps))))
+          PY
+        env:
+          REPS: ${{ github.event.inputs.reps }}
+
+  # Scenarios run one after another, and one repetition at a time, so that each
+  # job sees a deterministic cache state: rep 0 is cold, the rest are warm.
+  gocica:
+    name: measure (gocica, ${{ matrix.rep }})
+    needs: [build]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        rep: ${{ fromJSON(needs.build.outputs.reps) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: gocica-src
+      - name: Clear the gocica cache entries
+        if: matrix.rep == 0
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const script = require('./gocica-src/.github/scripts/clear-caches.js')
+            await script({ github, context, prefixes: ['gocica-cache-', 'gocica-mod-'] })
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.inputs.target-repo }}
+          ref: ${{ github.event.inputs.target-ref }}
+          path: target
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # gocica replaces this cache entirely. That is the whole point.
+          cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.APP_NAME }}
+      # ref: https://github.com/actions/download-artifact#permission-loss
+      - name: Fix permissions
+        run: chmod +x ${{ env.APP_NAME }}
+      - name: Expose GitHub Actions runtime environment variables
+        uses: crazy-max/ghaction-github-runtime@v4
+      - name: Measure
+        working-directory: target
+        run: bash "$GITHUB_WORKSPACE/gocica-src/.github/scripts/measure.sh"
+        env:
+          SCENARIO: gocica
+          REP: ${{ matrix.rep }}
+          BUILD_CMD: ${{ github.event.inputs.build-cmd }}
+          GOCICA_BIN: ${{ github.workspace }}/${{ env.APP_NAME }}
+          USE_GOCICA: '1'
+          CGO_ENABLED: '0'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: metrics-gocica-${{ matrix.rep }}
+          path: metrics
+
+  setupgo:
+    name: measure (setupgo, ${{ matrix.rep }})
+    needs: [build, gocica]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        rep: ${{ fromJSON(needs.build.outputs.reps) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: gocica-src
+      - name: Clear the setup-go cache entries
+        if: matrix.rep == 0
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const script = require('./gocica-src/.github/scripts/clear-caches.js')
+            await script({ github, context, prefixes: ['setup-go-'] })
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.inputs.target-repo }}
+          ref: ${{ github.event.inputs.target-ref }}
+          path: target
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: target/go.sum
+      - name: Measure
+        working-directory: target
+        run: bash "$GITHUB_WORKSPACE/gocica-src/.github/scripts/measure.sh"
+        env:
+          SCENARIO: setupgo
+          REP: ${{ matrix.rep }}
+          BUILD_CMD: ${{ github.event.inputs.build-cmd }}
+          CGO_ENABLED: '0'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: metrics-setupgo-${{ matrix.rep }}
+          path: metrics
+
+  nocache:
+    name: measure (nocache, ${{ matrix.rep }})
+    needs: [build, setupgo]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        rep: ${{ fromJSON(needs.build.outputs.reps) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: gocica-src
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.inputs.target-repo }}
+          ref: ${{ github.event.inputs.target-ref }}
+          path: target
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Measure
+        working-directory: target
+        run: bash "$GITHUB_WORKSPACE/gocica-src/.github/scripts/measure.sh"
+        env:
+          SCENARIO: nocache
+          REP: ${{ matrix.rep }}
+          BUILD_CMD: ${{ github.event.inputs.build-cmd }}
+          CGO_ENABLED: '0'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: metrics-nocache-${{ matrix.rep }}
+          path: metrics
+
+  report:
+    name: Report
+    needs: [gocica, setupgo, nocache]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: metrics-*
+          path: metrics
+      - name: Collect job wall times
+        run: gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" > jobs.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Aggregate
+        run: go tool bench -metrics metrics -jobs jobs.json | tee -a "$GITHUB_STEP_SUMMARY"

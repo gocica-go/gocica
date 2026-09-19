@@ -7,6 +7,7 @@ tool (
 	github.com/mazrean/kessoku/cmd/kessoku
 	github.com/mazrean/odjson
 	google.golang.org/protobuf/cmd/protoc-gen-go
+	tools/bench
 	tools/lint
 )
 
