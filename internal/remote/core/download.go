@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
@@ -23,6 +24,9 @@ type Downloader struct {
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
+
+	outputIndexOnce sync.Once
+	outputIndex     map[string]*v1.ActionsOutput
 }
 
 // DownloadClient defines the interface for downloading blocks from remote storage.
@@ -211,14 +215,21 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 }
 
 // Output returns the blob entry for an object ID.
+//
+// The lookup index is built on first use: the bulk download path never needs it,
+// and the module proxy asks once per module, which is often enough that a linear
+// scan over every output in the blob would show up.
 func (d *Downloader) Output(id string) (*v1.ActionsOutput, bool) {
-	for _, output := range d.header.Outputs {
-		if output.Id == id {
-			return output, true
+	d.outputIndexOnce.Do(func() {
+		d.outputIndex = make(map[string]*v1.ActionsOutput, len(d.header.Outputs))
+		for _, output := range d.header.Outputs {
+			d.outputIndex[output.Id] = output
 		}
-	}
+	})
 
-	return nil, false
+	output, ok := d.outputIndex[id]
+
+	return output, ok
 }
 
 // DownloadOutput fetches a single output by range and writes its decompressed
