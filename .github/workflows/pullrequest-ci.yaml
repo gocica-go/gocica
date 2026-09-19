@@ -115,13 +115,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v6
-      - name: golangci-lint
-        uses: reviewdog/action-golangci-lint@v2.8
+      - uses: actions/setup-go@v6
         with:
-          go_version_file: go.mod
-          reporter: github-pr-review
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          fail_level: error
+          go-version-file: go.mod
+          cache: true
+      - run: go tool lint ./... ./tools/...
