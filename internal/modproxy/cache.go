@@ -99,8 +99,15 @@ type Cache struct {
 	entries map[string]*v1.IndexEntry
 	now     *timestamppb.Timestamp
 
-	fetchGroup singleflight.Group
-	stored     atomic.Int64
+	fetchGroup         singleflight.Group
+	fetchCounterLocker sync.Mutex
+	stored             atomic.Int64
+
+	// pending tracks objects the bulk prefetch is responsible for. A request for
+	// one of them waits on its channel instead of starting a second transfer, so
+	// it is answered the moment the prefetch reaches it.
+	pendingLocker sync.RWMutex
+	pending       map[string]chan struct{}
 	// closed is set when the flush starts. After that an object may still be
 	// served from disk, but it must not enter the index: the flush has already
 	// waited for the uploads, so a late entry would point at bytes that never
@@ -197,6 +204,12 @@ func (c *Cache) fetch(ctx context.Context, objectID string) bool {
 
 	ok, _, _ := c.fetchGroup.Do(objectID, func() (any, error) {
 		if c.store.Has(objectID) {
+			return true, nil
+		}
+
+		// If the bulk prefetch owns this object, wait for it rather than pull the
+		// same bytes down a second time.
+		if c.waitPending(ctx, objectID) && c.store.Has(objectID) {
 			return true, nil
 		}
 
@@ -333,6 +346,18 @@ func (c *Cache) Prefetch(ctx context.Context, concurrency int) {
 		return
 	}
 
+	// One sequential pass over the blob beats one request per object whenever
+	// most of the index is missing locally, which is the ordinary warm start.
+	if len(objectIDs) > c.downloaderOutputCount()/2 {
+		c.logger.Infof("prefetching %d module objects in blob order.", len(objectIDs))
+		if err := c.bulkPrefetch(ctx, objectIDs); err == nil {
+			return
+		} else {
+			c.logger.Warnf("bulk prefetch: %v. falling back to per-object prefetch.", err)
+			objectIDs = c.indexedObjects()
+		}
+	}
+
 	c.logger.Infof("prefetching %d module objects with %d workers.", len(objectIDs), concurrency)
 
 	started := time.Now()
@@ -351,6 +376,74 @@ func (c *Cache) Prefetch(ctx context.Context, concurrency int) {
 	_ = eg.Wait()
 
 	c.logger.Infof("prefetched %d module objects in %s.", len(objectIDs), time.Since(started))
+}
+
+// beginPending registers the objects the bulk prefetch will deliver.
+func (c *Cache) beginPending(objectIDs []string) {
+	c.pendingLocker.Lock()
+	defer c.pendingLocker.Unlock()
+
+	c.pending = make(map[string]chan struct{}, len(objectIDs))
+	for _, objectID := range objectIDs {
+		c.pending[objectID] = make(chan struct{})
+	}
+}
+
+// donePending releases anyone waiting on an object, whether or not it arrived.
+func (c *Cache) donePending(objectID string) {
+	c.pendingLocker.Lock()
+	defer c.pendingLocker.Unlock()
+
+	if ch, ok := c.pending[objectID]; ok {
+		delete(c.pending, objectID)
+		close(ch)
+	}
+}
+
+// finishPending releases everything the bulk pass never reached.
+func (c *Cache) finishPending() {
+	c.pendingLocker.Lock()
+	defer c.pendingLocker.Unlock()
+
+	for objectID, ch := range c.pending {
+		delete(c.pending, objectID)
+		close(ch)
+	}
+}
+
+// waitPending blocks until the bulk prefetch is done with an object. It reports
+// whether there was anything to wait for.
+func (c *Cache) waitPending(ctx context.Context, objectID string) bool {
+	c.pendingLocker.RLock()
+	ch, ok := c.pending[objectID]
+	c.pendingLocker.RUnlock()
+
+	if !ok {
+		return false
+	}
+
+	select {
+	case <-ch:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (c *Cache) countFetched(counter *int64) {
+	c.fetchCounterLocker.Lock()
+	defer c.fetchCounterLocker.Unlock()
+
+	*counter++
+}
+
+func (c *Cache) downloaderOutputCount() int {
+	outputs, err := c.downloader.GetOutputs(context.Background())
+	if err != nil {
+		return 0
+	}
+
+	return len(outputs)
 }
 
 func (c *Cache) indexedObjects() []string {

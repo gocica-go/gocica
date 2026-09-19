@@ -176,8 +176,10 @@ func TestCache_PrefetchWarmsEverything(t *testing.T) {
 
 	cache.Prefetch(t.Context(), 8)
 
-	if got := client.reads.Load(); got != int64(len(objects)) {
-		t.Errorf("prefetch issued %d range reads, want %d", got, len(objects))
+	// Neighbouring objects share a read: the transfer is latency-bound, so the
+	// request count is what costs.
+	if got := client.reads.Load(); got >= int64(len(objects)) {
+		t.Errorf("prefetch issued %d range reads for %d objects; they should be coalesced", got, len(objects))
 	}
 
 	// Everything is local now, so serving must not touch the remote again.
