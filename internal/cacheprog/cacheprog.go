@@ -12,9 +12,9 @@ import (
 type CacheProg struct {
 	logger    log.Logger
 	backend   Backend
-	hitCount  uint64
-	missCount uint64
-	putCount  uint64
+	hitCount  atomic.Uint64
+	missCount atomic.Uint64
+	putCount  atomic.Uint64
 }
 
 func NewCacheProg(logger log.Logger, backend Backend) *CacheProg {
@@ -28,13 +28,13 @@ func (cp *CacheProg) Get(ctx context.Context, req *protocol.Request, res *protoc
 	}
 
 	if diskPath == "" || meta == nil {
-		atomic.AddUint64(&cp.missCount, 1)
+		cp.missCount.Add(1)
 		cp.logger.Debugf("action %s not found(diskPath: %s, meta: %v)", req.ActionID, diskPath, meta)
 		res.Miss = true
 		return nil
 	}
 
-	atomic.AddUint64(&cp.hitCount, 1)
+	cp.hitCount.Add(1)
 	cp.logger.Debugf("action %s found", req.ActionID)
 	res.DiskPath = diskPath
 	res.OutputID = meta.OutputID
@@ -45,7 +45,7 @@ func (cp *CacheProg) Get(ctx context.Context, req *protocol.Request, res *protoc
 }
 
 func (cp *CacheProg) Put(ctx context.Context, req *protocol.Request, res *protocol.Response) error {
-	atomic.AddUint64(&cp.putCount, 1)
+	cp.putCount.Add(1)
 	diskPath, err := cp.backend.Put(ctx, req.ActionID, req.OutputID, req.BodySize, req.Body)
 	if err != nil {
 		return fmt.Errorf("put action: %w", err)
@@ -57,9 +57,9 @@ func (cp *CacheProg) Put(ctx context.Context, req *protocol.Request, res *protoc
 }
 
 func (cp *CacheProg) Close(ctx context.Context) error {
-	cp.logger.Infof("cache hit count: %d", atomic.LoadUint64(&cp.hitCount))
-	cp.logger.Infof("cache miss count: %d", atomic.LoadUint64(&cp.missCount))
-	cp.logger.Infof("cache put count: %d", atomic.LoadUint64(&cp.putCount))
+	cp.logger.Infof("cache hit count: %d", cp.hitCount.Load())
+	cp.logger.Infof("cache miss count: %d", cp.missCount.Load())
+	cp.logger.Infof("cache put count: %d", cp.putCount.Load())
 
 	if err := cp.backend.Close(ctx); err != nil {
 		return fmt.Errorf("close backend: %w", err)

@@ -14,10 +14,8 @@ func TestAfterFirst(t *testing.T) {
 	sLocker := sync.Mutex{}
 	s := make([]bool, 0, 5)
 	wg := sync.WaitGroup{}
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			af.Run(func() bool {
 				func() {
 					sLocker.Lock()
@@ -32,7 +30,7 @@ func TestAfterFirst(t *testing.T) {
 				defer sLocker.Unlock()
 				s = append(s, false)
 			})
-		}()
+		})
 	}
 	wg.Wait()
 
