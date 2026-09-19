@@ -179,6 +179,41 @@ func (m *mockBaseBlobProvider) GetOutputs(_ context.Context) ([]*v1.ActionsOutpu
 	return nil, errors.New("unexpected DownloadOutputs call")
 }
 
+func (m *mockBaseBlobProvider) GetEntries(ctx context.Context) (map[string]*v1.IndexEntry, error) {
+	for _, call := range slices.Backward(m.calls) {
+		if call.method == "GetEntries" {
+			entries, _ := call.result[0].(map[string]*v1.IndexEntry)
+			if call.result[1] == nil {
+				return entries, nil
+			}
+			if err, ok := call.result[1].(error); ok {
+				return nil, err
+			}
+		}
+	}
+
+	// Default: reference every output, so a test that only sets up outputs keeps
+	// all of them.
+	outputs, err := m.GetOutputs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make(map[string]*v1.IndexEntry, len(outputs))
+	for _, output := range outputs {
+		entries[output.Id] = &v1.IndexEntry{OutputId: output.Id}
+	}
+
+	return entries, nil
+}
+
+func (m *mockBaseBlobProvider) expectGetEntries(entries map[string]*v1.IndexEntry, err error) {
+	m.calls = append(m.calls, mockCall{
+		method: "GetEntries",
+		result: []any{entries, err},
+	})
+}
+
 func (m *mockBaseBlobProvider) GetOutputBlockURL(_ context.Context) (string, int64, int64, error) {
 	for _, call := range slices.Backward(m.calls) {
 
@@ -243,7 +278,9 @@ func TestNewUploader(t *testing.T) {
 				offset := int64(100)
 				size := int64(200)
 				provider.expectGetOutputBlockURL("test-url", offset, size, nil)
-				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
+				provider.expectDownloadOutputs([]*v1.ActionsOutput{
+					{Id: "base-output", Offset: 0, Size: size},
+				}, nil)
 				client.expectUploadBlockFromURL(offset, size, nil)
 			},
 			checkBaseFunc:    true,
@@ -276,7 +313,9 @@ func TestNewUploader(t *testing.T) {
 				offset := int64(100)
 				size := int64(200)
 				provider.expectGetOutputBlockURL("test-url", offset, size, nil)
-				provider.expectDownloadOutputs([]*v1.ActionsOutput{}, nil)
+				provider.expectDownloadOutputs([]*v1.ActionsOutput{
+					{Id: "base-output", Offset: 0, Size: size},
+				}, nil)
 				client.expectUploadBlockFromURL(offset, size, errors.New("upload error"))
 			},
 			checkBaseFunc: true,
@@ -295,12 +334,12 @@ func TestNewUploader(t *testing.T) {
 
 			var baseProvider BaseBlobProvider = provider
 
-			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider)
+			uploader := NewUploader(t.Context(), log.DefaultLogger, client, baseProvider, nil)
 			if uploader == nil {
 				t.Fatal("uploader is nil")
 			}
 
-			baseBlockIDs, size, outputs, err := uploader.waitBaseFunc()
+			baseBlockIDs, size, outputs, err := uploader.ensureBase()()
 			if tt.expectError {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -389,7 +428,7 @@ func TestUploader_UploadOutput(t *testing.T) {
 			t.Parallel()
 
 			client := &mockUploadClient{}
-			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{})
+			uploader := NewUploader(t.Context(), log.DefaultLogger, client, &mockBaseBlobProvider{}, nil)
 
 			reader, err := tt.setupMock(client)
 			if err != nil {
@@ -424,6 +463,7 @@ func TestUploader_Commit(t *testing.T) {
 		entries       map[string]*v1.IndexEntry
 		setupUploader func(context.Context, *mockUploadClient, *mockBaseBlobProvider) *Uploader
 		expectError   bool
+		wantPublished bool
 		validateState func(*testing.T, *Uploader)
 	}{
 		{
@@ -437,12 +477,12 @@ func TestUploader_Commit(t *testing.T) {
 				},
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
-				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
+				provider.expectGetOutputBlockURL("test-url", 0, 50, nil)
 				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
-				client.expectUploadBlockFromURL(0, 100, nil)
+				client.expectUploadBlockFromURL(0, 50, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
-				return NewUploader(ctx, log.DefaultLogger, client, provider)
+				return NewUploader(ctx, log.DefaultLogger, client, provider, nil)
 			},
 		},
 		{
@@ -456,13 +496,13 @@ func TestUploader_Commit(t *testing.T) {
 				},
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
-				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
+				provider.expectGetOutputBlockURL("test-url", 0, 50, nil)
 				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
-				client.expectUploadBlockFromURL(0, 100, nil)
+				client.expectUploadBlockFromURL(0, 50, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(nil)
 
-				uploader := NewUploader(ctx, log.DefaultLogger, client, provider)
+				uploader := NewUploader(ctx, log.DefaultLogger, client, provider, nil)
 				uploader.outputs = []*v1.ActionsOutput{
 					{
 						Id:          "new-output",
@@ -473,13 +513,15 @@ func TestUploader_Commit(t *testing.T) {
 				}
 				return uploader
 			},
+			wantPublished: true,
 			validateState: func(t *testing.T, u *Uploader) {
 				u.outputsLocker.RLock()
 				defer u.outputsLocker.RUnlock()
 				if diff := cmp.Diff([]*v1.ActionsOutput{
 					{
-						Id:          "new-output",
-						Offset:      100,
+						Id: "new-output",
+						// Appended right after the retained base, which compacts to 50 bytes.
+						Offset:      50,
 						Size:        150,
 						Compression: v1.Compression_COMPRESSION_ZSTD,
 					},
@@ -499,14 +541,42 @@ func TestUploader_Commit(t *testing.T) {
 				},
 			},
 			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
-				provider.expectGetOutputBlockURL("test-url", 0, 100, nil)
+				provider.expectGetOutputBlockURL("test-url", 0, 50, nil)
 				provider.expectDownloadOutputs(slices.Clone(baseOutputs), nil)
-				client.expectUploadBlockFromURL(0, 100, nil)
+				client.expectUploadBlockFromURL(0, 50, nil)
 				client.expectAnyUploadBlock(50, nil)
 				client.expectCommit(errors.New("commit error"))
-				return NewUploader(ctx, log.DefaultLogger, client, provider)
+				uploader := NewUploader(ctx, log.DefaultLogger, client, provider, nil)
+				uploader.outputs = []*v1.ActionsOutput{
+					{
+						Id:          "new-output",
+						Size:        50,
+						Compression: v1.Compression_COMPRESSION_ZSTD,
+					},
+				}
+				return uploader
 			},
 			expectError: true,
+		},
+		{
+			name: "no new output skips the whole upload",
+			entries: map[string]*v1.IndexEntry{
+				"test": {
+					OutputId:   "test",
+					Size:       100,
+					Timenano:   time.Now().UnixNano(),
+					LastUsedAt: timestamppb.Now(),
+				},
+			},
+			setupUploader: func(ctx context.Context, client *mockUploadClient, provider *mockBaseBlobProvider) *Uploader {
+				// No expectations registered: touching the remote at all must fail the test.
+				return NewUploader(ctx, log.DefaultLogger, client, provider, nil)
+			},
+			validateState: func(t *testing.T, u *Uploader) {
+				if u.waitBaseFunc != nil {
+					t.Error("base copy must not be started when nothing was uploaded")
+				}
+			},
 		},
 	}
 
@@ -518,7 +588,7 @@ func TestUploader_Commit(t *testing.T) {
 			provider := &mockBaseBlobProvider{}
 			uploader := tt.setupUploader(t.Context(), client, provider)
 
-			err := uploader.Commit(t.Context(), tt.entries)
+			published, err := uploader.Commit(t.Context(), tt.entries)
 
 			if tt.expectError {
 				if err == nil {
@@ -528,6 +598,10 @@ func TestUploader_Commit(t *testing.T) {
 			}
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+
+			if tt.wantPublished != published {
+				t.Errorf("published = %v, want %v", published, tt.wantPublished)
 			}
 
 			if tt.validateState != nil {

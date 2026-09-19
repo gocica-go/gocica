@@ -49,11 +49,8 @@ func NewBackend(
 				}
 			}()
 
-			if err := c.downloader.DownloadAllOutputBlocks(ctx, func(ctx context.Context, objectID string) (io.WriteCloser, error) {
-				_, w, err := localBackend.Put(ctx, objectID, 0)
-				return w, err
-			}); err != nil {
-				logger.Errorf("download all output blocks: %v", err)
+			if err := PrewarmLocal(ctx, logger, c.downloader, localBackend); err != nil {
+				logger.Errorf("prewarm local cache: %v", err)
 			}
 		}()
 	}
@@ -73,7 +70,7 @@ func (c *Backend) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, erro
 }
 
 func (c *Backend) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	if err := c.uploader.Commit(ctx, metaDataMap); err != nil {
+	if _, err := c.uploader.Commit(ctx, metaDataMap); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 

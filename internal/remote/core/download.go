@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/DataDog/zstd"
 	myio "github.com/mazrean/gocica/internal/pkg/io"
@@ -23,11 +24,14 @@ type Downloader struct {
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
+
+	outputIndexOnce sync.Once
+	outputIndex     map[string]*v1.ActionsOutput
 }
 
 // DownloadClient defines the interface for downloading blocks from remote storage.
 type DownloadClient interface {
-	GetURL(ctx context.Context) string
+	GetURL(ctx context.Context) (string, error)
 	DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
@@ -101,7 +105,10 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 		return "", 0, 0, errors.New("no download client")
 	}
 
-	url = d.client.GetURL(ctx)
+	url, err = d.client.GetURL(ctx)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("get url: %w", err)
+	}
 	offset = d.headerSize
 	size = d.header.OutputTotalSize
 
@@ -114,9 +121,25 @@ const maxChunkSize = 4 * (1 << 20)
 // ref: https://github.com/golang/go/issues/46279
 const openFileLimit = 100000
 
-func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error)) error {
+// DownloadAllOutputBlocks writes every output of the blob through
+// objectWriterFunc, coalescing neighbouring outputs into chunked reads.
+//
+// skip, when non-nil, reports outputs that are already available locally. Their
+// bytes are stepped over rather than transferred, which is what keeps the proxy
+// daemon's prewarm from being undone by the next process downloading the same
+// blob again. A skipped output ends the chunk it falls in, since a chunk is one
+// contiguous read.
+func (d *Downloader) DownloadAllOutputBlocks(
+	ctx context.Context,
+	objectWriterFunc func(ctx context.Context, objectID string) (io.WriteCloser, error),
+	skip func(objectID string) bool,
+) error {
 	if d.client == nil {
 		return nil
+	}
+
+	if skip == nil {
+		skip = func(string) bool { return false }
 	}
 
 	outputs := d.header.Outputs
@@ -129,12 +152,20 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 	s := semaphore.NewWeighted(openFileLimit)
 	offset := d.headerSize
 	for i := 0; i < len(outputs); {
+		for i < len(outputs) && skip(outputs[i].Id) {
+			offset += outputs[i].Size
+			i++
+		}
+		if i >= len(outputs) {
+			break
+		}
+
 		d.logger.Debugf("creating chunk: %d", i)
 		chunkOffset := offset
 		chunkSize := int64(0)
 		chunkWriters := []myio.WriterWithSize{}
 		chunkCloseFuncs := []func() error{}
-		for ; i < len(outputs) && chunkSize < maxChunkSize; i++ {
+		for ; i < len(outputs) && chunkSize < maxChunkSize && !skip(outputs[i].Id); i++ {
 			output := outputs[i]
 			offset += output.Size
 			chunkSize += output.Size
@@ -202,6 +233,63 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 	if err := eg.Wait(); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// Output returns the blob entry for an object ID.
+//
+// The lookup index is built on first use: the bulk download path never needs it,
+// and the module proxy asks once per module, which is often enough that a linear
+// scan over every output in the blob would show up.
+func (d *Downloader) Output(id string) (*v1.ActionsOutput, bool) {
+	d.outputIndexOnce.Do(func() {
+		d.outputIndex = make(map[string]*v1.ActionsOutput, len(d.header.Outputs))
+		for _, output := range d.header.Outputs {
+			d.outputIndex[output.Id] = output
+		}
+	})
+
+	output, ok := d.outputIndex[id]
+
+	return output, ok
+}
+
+// DownloadOutput fetches a single output by range and writes its decompressed
+// bytes to w.
+//
+// This is the counterpart of DownloadAllOutputBlocks for callers that only need a
+// few objects out of a large blob. The build cache wants everything, so it uses
+// the bulk path; the module proxy only needs the modules this build actually
+// imports, which is a fraction of the module graph.
+func (d *Downloader) DownloadOutput(ctx context.Context, output *v1.ActionsOutput, w io.Writer) error {
+	if d.client == nil {
+		return errors.New("no download client")
+	}
+
+	if output.Size == 0 {
+		return nil
+	}
+
+	var closeFunc func() error
+	if output.Compression == v1.Compression_COMPRESSION_ZSTD {
+		dw := zstd.NewDecompressWriter(w)
+		w, closeFunc = dw, dw.Close
+	}
+
+	if err := d.client.DownloadBlock(ctx, d.headerSize+output.Offset, output.Size, w); err != nil {
+		if closeFunc != nil {
+			_ = closeFunc()
+		}
+
+		return fmt.Errorf("download block: %w", err)
+	}
+
+	if closeFunc != nil {
+		if err := closeFunc(); err != nil {
+			return fmt.Errorf("close decompress writer: %w", err)
+		}
 	}
 
 	return nil

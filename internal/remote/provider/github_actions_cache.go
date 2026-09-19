@@ -3,6 +3,8 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +16,6 @@ import (
 	"github.com/mazrean/gocica/internal/pkg/json"
 	"github.com/mazrean/gocica/internal/pkg/metrics"
 	"github.com/mazrean/gocica/internal/remote/core"
-	"github.com/mazrean/gocica/internal/remote/storage"
 	"github.com/mazrean/gocica/log"
 	"golang.org/x/oauth2"
 )
@@ -25,6 +26,10 @@ type GHACacheConfig struct {
 	RunnerOS string
 	Ref      string
 	Sha      string
+	// Prefix and KeyVersion namespace the cache entry. Empty values fall back to
+	// the build cache namespace, so existing keys stay byte-for-byte identical.
+	Prefix     string
+	KeyVersion string
 }
 
 func GHACacheProvider(
@@ -32,39 +37,13 @@ func GHACacheProvider(
 	logger log.Logger,
 	config *GHACacheConfig,
 ) (DownloadClientProvider, UploadClientProvider, error) {
-	cacheClient, err := newGitHubCacheClient(
-		ctx,
-		logger,
-		config.Token,
-		config.CacheURL,
-		config.RunnerOS,
-		config.Ref,
-		config.Sha,
-	)
+	cacheClient, err := newGitHubCacheClient(ctx, logger, config)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create github cache client: %w", err)
 	}
 
-	uploadClientProvider := func(ctx context.Context) (core.UploadClient, error) {
-		uploadURL, err := cacheClient.createCacheEntry(ctx)
-		switch {
-		case errors.Is(err, ErrAlreadyExists):
-			logger.Infof("cache entry already exists. skipping upload.")
-
-			return nil, nil
-		case err != nil:
-			return nil, fmt.Errorf("create cache entry: %w", err)
-		}
-
-		storageUploadClient, err := storage.NewAzureUploadClient(uploadURL)
-		if err != nil {
-			return nil, fmt.Errorf("create azure upload client: %w", err)
-		}
-
-		return &ghaCacheUploadClientWrapper{
-			UploadClient: storageUploadClient,
-			client:       cacheClient,
-		}, nil
+	uploadClientProvider := func(context.Context) (core.UploadClient, error) {
+		return &lazyUploadClient{logger: logger, cacheClient: cacheClient}, nil
 	}
 
 	downloadClientProvider := func(ctx context.Context) (core.DownloadClient, error) {
@@ -76,46 +55,38 @@ func GHACacheProvider(
 			return nil, nil
 		}
 
-		storageDownloadClient, err := storage.NewAzureDownloadClient(downloadURL)
+		downloadClient, err := newRefreshingDownloadClient(logger, cacheClient, downloadURL)
 		if err != nil {
-			return nil, fmt.Errorf("create azure download client: %w", err)
+			return nil, fmt.Errorf("create refreshing download client: %w", err)
 		}
 
-		return storageDownloadClient, nil
+		return downloadClient, nil
 	}
 
 	return downloadClientProvider, uploadClientProvider, nil
-}
-
-var _ core.UploadClient = (*ghaCacheUploadClientWrapper)(nil)
-
-type ghaCacheUploadClientWrapper struct {
-	core.UploadClient
-	client *ghaCacheClient
-}
-
-func (w *ghaCacheUploadClientWrapper) Commit(ctx context.Context, blockIDs []string, size int64) error {
-	if err := w.UploadClient.Commit(ctx, blockIDs, size); err != nil {
-		return fmt.Errorf("commit upload client: %w", err)
-	}
-
-	if err := w.client.commitCacheEntry(ctx, size); err != nil {
-		return fmt.Errorf("commit cache entry: %w", err)
-	}
-
-	return nil
 }
 
 const (
 	actionsCacheBasePath  = "/twirp/github.actions.results.api.v1.CacheService/"
 	actionsCachePrefix    = "gocica-cache"
 	actionsCacheSeparator = "-"
+
+	// ModuleCachePrefix namespaces the Go module proxy cache entry.
+	ModuleCachePrefix = "gocica-mod"
 )
 
 // actionsCacheVersion is sha256 of the context.
 // upstream uses paths in actionsCacheVersion, we don't seem to have anything that is unique like this.
 // so we use the sha256 of "gocica-cache-1.0" as a actionsCacheVersion.
 var actionsCacheVersion = "5eb02eebd0c9b2a428c370e552c7c895ea26154c726235db0a053f746fae0287"
+
+// ModuleCacheVersion is sha256 of "gocica-mod-1.0". GitHub treats version as part
+// of the entry identity, so this keeps the module namespace isolated from the
+// build cache even if the two ever shared a key prefix.
+var ModuleCacheVersion = func() string {
+	sum := sha256.Sum256([]byte("gocica-mod-1.0"))
+	return hex.EncodeToString(sum[:])
+}()
 
 var (
 	ErrCacheNotFound = errors.New("cache not found")
@@ -133,40 +104,46 @@ type ghaCacheClient struct {
 	runnerOS   string
 	ref        string
 	sha        string
+	prefix     string
+	version    string
 }
 
 // newGitHubCacheClient creates a new GitHub Cache API client.
-func newGitHubCacheClient(
-	ctx context.Context,
-	logger log.Logger,
-	token string,
-	strBaseURL string,
-	runnerOS string,
-	ref, sha string,
-) (*ghaCacheClient, error) {
-	baseURL, err := url.Parse(strBaseURL)
+func newGitHubCacheClient(ctx context.Context, logger log.Logger, config *GHACacheConfig) (*ghaCacheClient, error) {
+	baseURL, err := url.Parse(config.CacheURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse base url: %w", err)
 	}
 	baseURL = baseURL.JoinPath(actionsCacheBasePath)
 
 	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
-		AccessToken: token,
+		AccessToken: config.Token,
 	}))
+
+	prefix := config.Prefix
+	if prefix == "" {
+		prefix = actionsCachePrefix
+	}
+	version := config.KeyVersion
+	if version == "" {
+		version = actionsCacheVersion
+	}
 
 	return &ghaCacheClient{
 		logger:     logger,
 		httpClient: httpClient,
 		baseURL:    baseURL,
-		runnerOS:   runnerOS,
-		ref:        ref,
-		sha:        sha,
+		runnerOS:   config.RunnerOS,
+		ref:        config.Ref,
+		sha:        config.Sha,
+		prefix:     prefix,
+		version:    version,
 	}, nil
 }
 
 // blobKey returns the cache key and restore keys for this configuration.
 func (c *ghaCacheClient) blobKey() (string, []string) {
-	baseKey := actionsCachePrefix + actionsCacheSeparator + c.runnerOS
+	baseKey := c.prefix + actionsCacheSeparator + c.runnerOS
 	restoreKeys := make([]string, 0, 2)
 	for _, k := range []string{c.ref, c.sha} {
 		baseKey += actionsCacheSeparator
@@ -240,7 +217,7 @@ func (c *ghaCacheClient) getDownloadURL(ctx context.Context) (string, error) {
 		Key         string   `json:"key"`
 		RestoreKeys []string `json:"restore_keys"`
 		Version     string   `json:"version"`
-	}{key, restoreKeys, actionsCacheVersion}, &res)
+	}{key, restoreKeys, c.version}, &res)
 	if err != nil {
 		return "", fmt.Errorf("get cache entry download url: %w", err)
 	}
@@ -266,7 +243,7 @@ func (c *ghaCacheClient) createCacheEntry(ctx context.Context) (string, error) {
 	err := c.doRequest(ctx, "CreateCacheEntry", &struct {
 		Key     string `json:"key"`
 		Version string `json:"version"`
-	}{key, actionsCacheVersion}, &res)
+	}{key, c.version}, &res)
 	if err != nil {
 		return "", fmt.Errorf("http request: %w", err)
 	}
@@ -293,7 +270,7 @@ func (c *ghaCacheClient) commitCacheEntry(ctx context.Context, size int64) error
 		Key       string `json:"key"`
 		SizeBytes int64  `json:"size_bytes"`
 		Version   string `json:"version"`
-	}{key, size, actionsCacheVersion}, &res)
+	}{key, size, c.version}, &res)
 	if err != nil {
 		return fmt.Errorf("http request: %w", err)
 	}
