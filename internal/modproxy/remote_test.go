@@ -330,3 +330,37 @@ func TestCache_RestoresCompressedObjects(t *testing.T) {
 		t.Errorf("size = %d, want %d", size, len(objects[compressedPath]))
 	}
 }
+
+func TestCache_BulkPrefetchRejectsCorruptObjects(t *testing.T) {
+	t.Parallel()
+
+	const corrupt = "b.example.com/m/@v/v1.0.0.zip"
+	objects := map[string][]byte{
+		"a.example.com/m/@v/v1.0.0.zip": bytes.Repeat([]byte("aaa"), 500),
+		corrupt:                         bytes.Repeat([]byte("bbb"), 500),
+		"c.example.com/m/@v/v1.0.0.zip": bytes.Repeat([]byte("ccc"), 500),
+	}
+
+	cache := newRemoteCache(t, newBlob(t, objects, corrupt))
+	cache.Prefetch(t.Context(), 4)
+
+	// The bulk pass is the ordinary warm path, so it has to verify each object
+	// just as strictly: serving damaged bytes is an unrecoverable checksum failure
+	// for the go command, not a miss it can retry past.
+	if _, _, ok := cache.Get(t.Context(), corrupt); ok {
+		t.Error("a corrupt object survived the bulk prefetch")
+	}
+
+	for path := range objects {
+		if path == corrupt {
+			continue
+		}
+		f, _, ok := cache.Get(t.Context(), path)
+		if !ok {
+			t.Errorf("%s: an intact neighbour of a corrupt object was lost", path)
+
+			continue
+		}
+		_ = f.Close()
+	}
+}
