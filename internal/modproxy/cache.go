@@ -13,6 +13,7 @@ import (
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/log"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -89,6 +90,9 @@ type Cache struct {
 
 	fetchGroup singleflight.Group
 	stored     atomic.Int64
+	// uploads run in the background so a 70 MB module zip is not transferred to
+	// the remote while the go command's request is still open. Flush waits.
+	uploads errgroup.Group
 }
 
 // NewCache restores the index from the remote blob. A nil downloader or uploader
@@ -243,18 +247,44 @@ func (c *Cache) Store(ctx context.Context, path string, w *Writer, compressible 
 	c.stored.Add(1)
 
 	if c.uploader != nil {
-		f, _, err := c.store.Open(objectID)
-		if err != nil {
-			return objectID, fmt.Errorf("reopen object for upload: %w", err)
-		}
-		defer f.Close()
+		c.uploads.Go(func() error {
+			// Detached from the request: the go command must not wait for the
+			// remote, and cancelling the request must not abandon the upload.
+			if err := c.upload(context.WithoutCancel(ctx), objectID, size); err != nil {
+				// Drop the entry rather than fail the whole flush. An index pointing
+				// at bytes that are not in the blob would break every later build;
+				// losing one module just means refetching it next time.
+				c.logger.Warnf("upload module object %s: %v. dropping it from the index.", objectID, err)
+				c.forget(path)
+			}
 
-		if err := c.uploader.UploadOutput(ctx, objectID, size, f); err != nil {
-			return objectID, fmt.Errorf("upload object: %w", err)
-		}
+			return nil
+		})
 	}
 
 	return objectID, nil
+}
+
+func (c *Cache) upload(ctx context.Context, objectID string, size int64) error {
+	f, _, err := c.store.Open(objectID)
+	if err != nil {
+		return fmt.Errorf("reopen object: %w", err)
+	}
+	defer f.Close()
+
+	if err := c.uploader.UploadOutput(ctx, objectID, size, f); err != nil {
+		return fmt.Errorf("upload output: %w", err)
+	}
+
+	return nil
+}
+
+// forget removes a path from the index.
+func (c *Cache) forget(path string) {
+	c.locker.Lock()
+	defer c.locker.Unlock()
+
+	delete(c.entries, path)
 }
 
 // Stored reports how many objects this run added.
@@ -274,6 +304,9 @@ func (c *Cache) Flush(ctx context.Context) error {
 
 		return nil
 	}
+
+	// Uploads never report errors: each one drops its own index entry on failure.
+	_ = c.uploads.Wait()
 
 	if err := c.uploader.Commit(ctx, c.snapshot()); err != nil {
 		return fmt.Errorf("commit module cache: %w", err)
