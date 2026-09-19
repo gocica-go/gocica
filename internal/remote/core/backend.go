@@ -49,11 +49,8 @@ func NewBackend(
 				}
 			}()
 
-			if err := c.downloader.DownloadAllOutputBlocks(ctx, func(ctx context.Context, objectID string) (io.WriteCloser, error) {
-				_, w, err := localBackend.Put(ctx, objectID, 0)
-				return w, err
-			}); err != nil {
-				logger.Errorf("download all output blocks: %v", err)
+			if err := PrewarmLocal(ctx, logger, c.downloader, localBackend); err != nil {
+				logger.Errorf("prewarm local cache: %v", err)
 			}
 		}()
 	}

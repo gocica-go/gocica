@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestStore_CommitAndOpen(t *testing.T) {
@@ -118,7 +119,7 @@ func TestStore_AbortLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-func TestStore_NewStoreClearsStaleTemporaries(t *testing.T) {
+func TestStore_NewStoreClearsOnlyAbandonedTemporaries(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -126,14 +127,32 @@ func TestStore_NewStoreClearsStaleTemporaries(t *testing.T) {
 	if err := os.MkdirAll(tmp, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "w-stale"), []byte("leftover"), 0600); err != nil {
+
+	stale := filepath.Join(tmp, "w-stale")
+	if err := os.WriteFile(stale, []byte("leftover"), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	old := time.Now().Add(-2 * staleTemporaryAge)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// Another gocica process may be writing here right now.
+	live := filepath.Join(tmp, "w-live")
+	if err := os.WriteFile(live, []byte("being written"), 0600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
 	if _, err := NewStore(StoreDir(dir)); err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	assertTmpEmpty(t, dir)
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("an abandoned temporary file survived, stat err = %v", err)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Errorf("a live temporary file was deleted: %v", err)
+	}
 }
 
 func TestStore_ConcurrentIdenticalCommits(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/mazrean/gocica/internal/local"
 	"github.com/mazrean/gocica/internal/modproxy"
 	mylog "github.com/mazrean/gocica/internal/pkg/log"
+	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/internal/remote/provider"
 	"github.com/mazrean/gocica/log"
 	"github.com/mazrean/gocica/protocol"
@@ -39,6 +40,7 @@ type serveCmd struct {
 	Upstream        string        `kong:"help='Upstream proxy to fetch misses from. Defaults to the http(s) entries of the ambient GOPROXY.',env='GOCICA_MODULE_PROXY_UPSTREAM'"`
 	MaxLifetime     time.Duration `kong:"default='6h',help='Exit after this long, so an orphaned daemon cannot outlive its job.',env='GOCICA_MODULE_PROXY_MAX_LIFETIME'"`
 	ExportGithubEnv bool          `kong:"name='export-github-env',help='Append GOPROXY to $GITHUB_ENV once listening.',env='GOCICA_MODULE_PROXY_EXPORT_GITHUB_ENV'"`
+	PrewarmBuild    bool          `kong:"name='prewarm-build-cache',default='true',negatable,help='Also pull the build cache onto local disk while the daemon is idle, so the first go command does not pay for it.',env='GOCICA_MODULE_PROXY_PREWARM_BUILD_CACHE'"`
 	StateFile       string        `kong:"help='Where to record the URL and pid. Defaults to <dir>/mod/proxy.json.',env='GOCICA_MODULE_PROXY_STATE_FILE'"`
 	Prefetch        int           `kong:"default='24',help='How many cached modules to pull from the remote at once on startup. 0 uses the default, a negative value disables prefetching.',env='GOCICA_MODULE_PROXY_PREFETCH'"`
 }
@@ -256,6 +258,10 @@ func runServe(logger log.Logger) error {
 		}
 	}
 
+	if CLI.Serve.PrewarmBuild {
+		go prewarmBuildCache(ctx, logger)
+	}
+
 	fmt.Printf("{\"url\":%q,\"goproxy\":%q}\n", daemon.URL(), goproxy)
 
 	if err := daemon.Run(ctx); err != nil {
@@ -263,6 +269,57 @@ func runServe(logger log.Logger) error {
 	}
 
 	return nil
+}
+
+// prewarmBuildCache pulls the build cache blob onto local disk while the daemon
+// is otherwise idle.
+//
+// Without it the first `go` command of the job restores it inside its own wall
+// time, and every later `go` command in the same job pays again. This is the one
+// thing actions/setup-go does that gocica structurally did not: restore before
+// the build rather than during it.
+//
+// It is wired by hand rather than through the injector because it needs a second
+// remote in the same process -- the build cache namespace, not the module one --
+// and the graph is keyed by type.
+func prewarmBuildCache(ctx context.Context, logger log.Logger) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("panic while prewarming the build cache: %v", r)
+		}
+	}()
+
+	downloadProvider, _, err := provider.GHACacheProvider(ctx, logger, githubConfig())
+	if err != nil {
+		logger.Warnf("prewarm the build cache: %v", err)
+
+		return
+	}
+
+	client, err := downloadProvider(ctx)
+	if err != nil || client == nil {
+		logger.Debugf("no build cache to prewarm: %v", err)
+
+		return
+	}
+
+	downloader, err := core.NewDownloader(ctx, logger, client)
+	if err != nil {
+		logger.Warnf("prewarm the build cache: %v", err)
+
+		return
+	}
+
+	disk, err := local.NewDisk(logger, local.DiskDir(CLI.Dir))
+	if err != nil {
+		logger.Warnf("prewarm the build cache: %v", err)
+
+		return
+	}
+
+	if err := core.PrewarmLocal(ctx, logger, downloader, disk); err != nil {
+		logger.Warnf("prewarm the build cache: %v", err)
+	}
 }
 
 func exportGithubEnv(key, value string) error {

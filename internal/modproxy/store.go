@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ErrHashMismatch is returned when committed bytes do not hash to the expected
@@ -42,11 +43,12 @@ type Store struct {
 func NewStore(dir StoreDir) (*Store, error) {
 	root := string(dir)
 	tmp := filepath.Join(root, tmpDirName)
-	if err := os.RemoveAll(tmp); err != nil {
-		return nil, fmt.Errorf("clear temporary directory: %w", err)
-	}
 	if err := os.MkdirAll(tmp, 0755); err != nil {
 		return nil, fmt.Errorf("create temporary directory: %w", err)
+	}
+	// Only abandoned files: another gocica process may be writing here now.
+	if err := clearStaleTemporaries(tmp); err != nil {
+		return nil, fmt.Errorf("clear stale temporary files: %w", err)
 	}
 
 	return &Store{root: root, tmp: tmp}, nil
@@ -172,3 +174,29 @@ func ObjectIDForContent(b []byte) string {
 }
 
 var _ io.Writer = (*Writer)(nil)
+
+// staleTemporaryAge is how old a leftover temporary file must be before it is
+// assumed abandoned.
+//
+// Sweeping the directory outright would delete files another gocica process is
+// writing right now.
+const staleTemporaryAge = time.Hour
+
+// clearStaleTemporaries removes abandoned temporary files, leaving live ones be.
+func clearStaleTemporaries(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read temporary directory: %w", err)
+	}
+
+	limit := time.Now().Add(-staleTemporaryAge)
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || info.ModTime().After(limit) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+	}
+
+	return nil
+}
