@@ -23,6 +23,11 @@ on:
         description: 'Repetitions per scenario (rep 0 is the cold run): 3 to iterate, 10 to confirm'
         required: false
         default: '3'
+      include-nocache:
+        description: Also measure with no cache at all. It is a fixed baseline, so it is off while iterating.
+        required: false
+        type: boolean
+        default: false
   # Temporary, for the measure-fix-measure loop on this branch: workflow_dispatch
   # only works for workflows that exist on the default branch. Remove before
   # merging.
@@ -178,6 +183,7 @@ jobs:
   nocache:
     name: measure (nocache, ${{ matrix.rep }})
     needs: [build, setupgo]
+    if: ${{ github.event.inputs.include-nocache == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 1
