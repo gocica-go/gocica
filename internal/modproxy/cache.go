@@ -393,11 +393,15 @@ func (c *Cache) Flush(ctx context.Context) error {
 	}
 
 	// Uploads never report errors: each one drops its own index entry on failure.
+	started := time.Now()
 	_ = c.uploads.Wait()
 
-	if err := c.uploader.Commit(ctx, c.snapshot()); err != nil {
+	entries := c.snapshot()
+	if err := c.uploader.Commit(ctx, entries); err != nil {
 		return fmt.Errorf("commit module cache: %w", err)
 	}
+
+	c.logger.Infof("published %d module objects (%d new) in %s.", len(entries), c.stored.Load(), time.Since(started))
 
 	return nil
 }
