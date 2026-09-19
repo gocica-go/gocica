@@ -116,14 +116,22 @@ jobs:
         uses: crazy-max/ghaction-github-runtime@v4
       - name: Start the module proxy
         run: |
+          set -euo pipefail
           mkdir -p ./tmp
           nohup ./${{ env.APP_NAME }} serve --dir=/tmp/gocica --export-github-env \
             > ./tmp/proxy.log 2>&1 &
-          for _ in $(seq 1 150); do
+          for _ in $(seq 1 300); do
             url=$(python3 -c "import json,sys;print(json.load(open('/tmp/gocica/mod/proxy.json'))['url'])" 2>/dev/null) || { sleep 0.1; continue; }
-            curl -fsS "$url/-/healthz" && break
+            if curl -fsS "$url/-/healthz"; then
+              exit 0
+            fi
             sleep 0.1
           done
+          # Failing here is the point: if the proxy never comes up the build would
+          # quietly fall back to proxy.golang.org and this job would prove nothing.
+          echo "module proxy never became healthy" >&2
+          cat ./tmp/proxy.log >&2
+          exit 1
       - run: go mod download
       - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
         env:
