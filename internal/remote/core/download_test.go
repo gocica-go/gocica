@@ -22,16 +22,16 @@ type mockDownloadClient struct {
 	calls []mockCall
 }
 
-func (m *mockDownloadClient) GetURL(context.Context) string {
+func (m *mockDownloadClient) GetURL(context.Context) (string, error) {
 	for _, call := range slices.Backward(m.calls) {
 
 		if call.method == "GetURL" {
 			if url, ok := call.result[0].(string); ok {
-				return url
+				return url, nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func (m *mockDownloadClient) DownloadBlock(_ context.Context, offset int64, size int64, w io.Writer) error {

@@ -93,8 +93,8 @@ func NewAzureDownloadClient(url string) (*AzureDownloadClient, error) {
 	return &AzureDownloadClient{client: client}, nil
 }
 
-func (a *AzureDownloadClient) GetURL(context.Context) string {
-	return a.client.URL()
+func (a *AzureDownloadClient) GetURL(context.Context) (string, error) {
+	return a.client.URL(), nil
 }
 
 func (a *AzureDownloadClient) DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error {

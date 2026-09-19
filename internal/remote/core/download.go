@@ -27,7 +27,7 @@ type Downloader struct {
 
 // DownloadClient defines the interface for downloading blocks from remote storage.
 type DownloadClient interface {
-	GetURL(ctx context.Context) string
+	GetURL(ctx context.Context) (string, error)
 	DownloadBlock(ctx context.Context, offset int64, size int64, w io.Writer) error
 	DownloadBlockBuffer(ctx context.Context, offset int64, size int64, buf []byte) error
 }
@@ -101,7 +101,10 @@ func (d *Downloader) GetOutputBlockURL(ctx context.Context) (url string, offset,
 		return "", 0, 0, errors.New("no download client")
 	}
 
-	url = d.client.GetURL(ctx)
+	url, err = d.client.GetURL(ctx)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("get url: %w", err)
+	}
 	offset = d.headerSize
 	size = d.header.OutputTotalSize
 
