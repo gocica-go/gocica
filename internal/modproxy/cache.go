@@ -497,8 +497,15 @@ func (c *Cache) Flush(ctx context.Context) error {
 	_ = c.uploads.Wait()
 
 	entries := c.snapshot()
-	if err := c.uploader.Commit(ctx, entries); err != nil {
+	published, err := c.uploader.Commit(ctx, entries)
+	if err != nil {
 		return fmt.Errorf("commit module cache: %w", err)
+	}
+
+	if !published {
+		c.logger.Infof("module cache was not published: the remote already has this run's entry.")
+
+		return nil
 	}
 
 	c.logger.Infof("published %d module objects (%d new) in %s.", len(entries), c.stored.Load(), time.Since(started))

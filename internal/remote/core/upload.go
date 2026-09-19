@@ -366,16 +366,20 @@ func (u *Uploader) createHeader(entries map[string]*v1.IndexEntry, outputs []*v1
 	return buf, nil
 }
 
-func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) error {
+// Commit publishes the blob. It reports whether anything was actually written:
+// a caller that logs "published" regardless would claim success on runs where
+// the remote refused the entry or there was nothing to add.
+func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry) (bool, error) {
 	if u.client == nil || u.uploadDisabled.Load() {
-		return nil
+		return false, nil
 	}
 
 	// Nothing was staged, so the blob would be a byte-for-byte copy of the base.
 	// Skip the whole round trip: the restore key chain still finds the base entry.
 	if u.newOutputCount() == 0 {
 		u.logger.Infof("no new output in this run. skipping cache entry upload.")
-		return nil
+
+		return false, nil
 	}
 
 	baseBlockIDs, baseOutputSize, baseOutputs, err := u.ensureBase()()
@@ -390,22 +394,22 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 
 	headerBuf, err := u.createHeader(entries, outputs, outputSize)
 	if err != nil {
-		return fmt.Errorf("create header: %w", err)
+		return false, fmt.Errorf("create header: %w", err)
 	}
 
 	headerBlockID, err := u.generateBlockID()
 	if err != nil {
-		return fmt.Errorf("generate header block ID: %w", err)
+		return false, fmt.Errorf("generate header block ID: %w", err)
 	}
 
 	_, err = u.client.UploadBlock(ctx, headerBlockID, myio.NopSeekCloser(bytes.NewReader(headerBuf)))
 	if errors.Is(err, ErrUploadDisabled) {
 		u.logger.Infof("remote refused this run's cache entry. continuing without upload.")
 
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("upload header: %w", err)
+		return false, fmt.Errorf("upload header: %w", err)
 	}
 
 	blockIDs := make([]string, 0, len(newOutputIDs)+2)
@@ -413,9 +417,14 @@ func (u *Uploader) Commit(ctx context.Context, entries map[string]*v1.IndexEntry
 	blockIDs = append(blockIDs, baseBlockIDs...)
 	blockIDs = append(blockIDs, newOutputIDs...)
 	err = u.client.Commit(ctx, blockIDs, int64(len(headerBuf))+outputSize)
+	if errors.Is(err, ErrUploadDisabled) {
+		u.logger.Infof("remote refused this run's cache entry. continuing without upload.")
+
+		return false, nil
+	}
 	if err != nil {
-		return fmt.Errorf("commit: %w", errors.Join(err, context.Cause(ctx)))
+		return false, fmt.Errorf("commit: %w", errors.Join(err, context.Cause(ctx)))
 	}
 
-	return nil
+	return true, nil
 }

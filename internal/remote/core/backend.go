@@ -70,7 +70,7 @@ func (c *Backend) MetaData(ctx context.Context) (map[string]*v1.IndexEntry, erro
 }
 
 func (c *Backend) WriteMetaData(ctx context.Context, metaDataMap map[string]*v1.IndexEntry) error {
-	if err := c.uploader.Commit(ctx, metaDataMap); err != nil {
+	if _, err := c.uploader.Commit(ctx, metaDataMap); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 

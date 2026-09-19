@@ -463,6 +463,7 @@ func TestUploader_Commit(t *testing.T) {
 		entries       map[string]*v1.IndexEntry
 		setupUploader func(context.Context, *mockUploadClient, *mockBaseBlobProvider) *Uploader
 		expectError   bool
+		wantPublished bool
 		validateState func(*testing.T, *Uploader)
 	}{
 		{
@@ -512,6 +513,7 @@ func TestUploader_Commit(t *testing.T) {
 				}
 				return uploader
 			},
+			wantPublished: true,
 			validateState: func(t *testing.T, u *Uploader) {
 				u.outputsLocker.RLock()
 				defer u.outputsLocker.RUnlock()
@@ -586,7 +588,7 @@ func TestUploader_Commit(t *testing.T) {
 			provider := &mockBaseBlobProvider{}
 			uploader := tt.setupUploader(t.Context(), client, provider)
 
-			err := uploader.Commit(t.Context(), tt.entries)
+			published, err := uploader.Commit(t.Context(), tt.entries)
 
 			if tt.expectError {
 				if err == nil {
@@ -596,6 +598,10 @@ func TestUploader_Commit(t *testing.T) {
 			}
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+
+			if tt.wantPublished != published {
+				t.Errorf("published = %v, want %v", published, tt.wantPublished)
 			}
 
 			if tt.validateState != nil {
