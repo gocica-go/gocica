@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataDog/zstd"
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/log"
@@ -52,9 +53,15 @@ func (c *blobClient) DownloadBlockBuffer(_ context.Context, offset, size int64, 
 }
 
 // newBlob builds a blob holding the given objects, keyed in the index by request
-// path. corrupt names an object whose stored bytes are damaged.
-func newBlob(t *testing.T, objects map[string][]byte, corrupt string) *blobClient {
+// path. corrupt names an object whose stored bytes are damaged; compressed names
+// one stored zstd-compressed, the way the uploader stores larger objects.
+func newBlob(t *testing.T, objects map[string][]byte, corrupt string, compressed ...string) *blobClient {
 	t.Helper()
+
+	isCompressed := make(map[string]struct{}, len(compressed))
+	for _, path := range compressed {
+		isCompressed[path] = struct{}{}
+	}
 
 	cache := &v1.ActionsCache{Entries: map[string]*v1.IndexEntry{}}
 	body := &bytes.Buffer{}
@@ -62,15 +69,21 @@ func newBlob(t *testing.T, objects map[string][]byte, corrupt string) *blobClien
 	for path, content := range objects {
 		id := ObjectIDForContent(content)
 		stored := content
+		compression := v1.Compression_COMPRESSION_UNSPECIFIED
+		if _, ok := isCompressed[path]; ok {
+			stored = compress(t, content)
+			compression = v1.Compression_COMPRESSION_ZSTD
+		}
 		if path == corrupt {
-			stored = append([]byte("damaged"), content...)
+			stored = append([]byte("damaged"), stored...)
 		}
 
 		cache.Entries[path] = &v1.IndexEntry{OutputId: id, Size: int64(len(content))}
 		cache.Outputs = append(cache.Outputs, &v1.ActionsOutput{
-			Id:     id,
-			Offset: int64(body.Len()),
-			Size:   int64(len(stored)),
+			Id:          id,
+			Offset:      int64(body.Len()),
+			Size:        int64(len(stored)),
+			Compression: compression,
 		})
 		body.Write(stored)
 	}
@@ -87,6 +100,21 @@ func newBlob(t *testing.T, objects map[string][]byte, corrupt string) *blobClien
 	blob = append(blob, body.Bytes()...)
 
 	return &blobClient{blob: blob}
+}
+
+func compress(t *testing.T, content []byte) []byte {
+	t.Helper()
+
+	buf := &bytes.Buffer{}
+	zw := zstd.NewWriterLevel(buf, 1)
+	if _, err := zw.Write(content); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close compressor: %v", err)
+	}
+
+	return buf.Bytes()
 }
 
 func newRemoteCache(t *testing.T, client *blobClient) *Cache {
@@ -268,5 +296,37 @@ func TestCache_RequestJoinsAnInFlightPrefetch(t *testing.T) {
 
 	if reads := client.reads.Load(); reads != 1 {
 		t.Errorf("the object was transferred %d times, want 1", reads)
+	}
+}
+
+func TestCache_RestoresCompressedObjects(t *testing.T) {
+	t.Parallel()
+
+	const compressedPath = "example.com/m/@v/v1.0.0.mod"
+	objects := map[string][]byte{
+		compressedPath:                bytes.Repeat([]byte("module example.com/m\n"), 500),
+		"example.com/m/@v/v1.0.0.zip": bytes.Repeat([]byte("zip"), 1000),
+	}
+
+	// The content hash is over the original bytes, so restoring has to decompress
+	// before it verifies. Getting that backwards would reject every compressed
+	// object -- silently, as a cache miss.
+	cache := newRemoteCache(t, newBlob(t, objects, "", compressedPath))
+
+	f, size, ok := cache.Get(t.Context(), compressedPath)
+	if !ok {
+		t.Fatal("compressed object was not restored")
+	}
+	defer f.Close()
+
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !bytes.Equal(got, objects[compressedPath]) {
+		t.Error("restored content does not match the original")
+	}
+	if size != int64(len(objects[compressedPath])) {
+		t.Errorf("size = %d, want %d", size, len(objects[compressedPath]))
 	}
 }
