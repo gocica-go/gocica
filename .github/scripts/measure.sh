@@ -82,10 +82,18 @@ if [ "$USE_GOCICA" = "1" ]; then
   # "|" rather than ",": it makes the go command fall back on any error, so a
   # daemon that dies mid-run cannot fail the build.
   export GOPROXY="$GOPROXY_URL|https://proxy.golang.org,direct"
-  export GOCACHEPROG="$GOCICA_BIN --dir=$GOCICA_DIR"
 fi
 
 phase mod_download go mod download
+
+if [ "$USE_GOCICA" = "1" ]; then
+  # Only the build runs under GOCACHEPROG. `go mod download` also touches the
+  # build cache, and since one run publishes a single cache entry per key, the
+  # first gocica process to upload claims it -- which would leave the build's own
+  # output unpublished and make the next warm run look worse than it is.
+  export GOCACHEPROG="$GOCICA_BIN --dir=$GOCICA_DIR"
+fi
+
 # shellcheck disable=SC2086 # BUILD_CMD is a command line on purpose.
 phase build $BUILD_CMD
 
