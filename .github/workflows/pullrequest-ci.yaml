@@ -121,4 +121,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go tool lint ./... ./tools/...
