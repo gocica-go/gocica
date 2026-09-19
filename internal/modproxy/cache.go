@@ -384,6 +384,12 @@ func (c *Cache) beginPending(objectIDs []string) {
 	c.pendingLocker.Lock()
 	defer c.pendingLocker.Unlock()
 
+	// Never drop a channel without closing it: whoever is waiting on it would
+	// wait until their request's context ran out.
+	for _, ch := range c.pending {
+		close(ch)
+	}
+
 	c.pending = make(map[string]chan struct{}, len(objectIDs))
 	for _, objectID := range objectIDs {
 		c.pending[objectID] = make(chan struct{})
