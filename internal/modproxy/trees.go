@@ -43,6 +43,85 @@ func moduleFromTreeKey(key string) (modtree.Module, bool) {
 	return modtree.Module{EscapedPath: path, EscapedVersion: version}, true
 }
 
+// RestoreDownloadCache writes the cached .info, .mod and .zip files straight
+// into the go command's download cache.
+//
+// Serving them over HTTP is not enough on its own: `go mod download` fetches
+// every module's zip whether or not the module is extracted, and hashes it
+// unless the ziphash is already there. It does neither for a file it already
+// has, so putting them on disk is what makes that command free.
+func (c *Cache) RestoreDownloadCache(ctx context.Context, gomodcache string) {
+	if gomodcache == "" {
+		return
+	}
+
+	type job struct {
+		file     modtree.DownloadFile
+		objectID string
+	}
+
+	var jobs []job
+	c.locker.RLock()
+	for key, entry := range c.entries {
+		f, ok := modtree.ParseDownloadPath(key)
+		if !ok {
+			continue
+		}
+		jobs = append(jobs, job{file: f, objectID: entry.OutputId})
+	}
+	c.locker.RUnlock()
+
+	if len(jobs) == 0 {
+		return
+	}
+
+	started := time.Now()
+	var written atomic64
+	eg := &errgroup.Group{}
+	eg.SetLimit(treeConcurrency)
+	for _, j := range jobs {
+		eg.Go(func() error {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if c.restoreDownloadFile(ctx, j.file, j.objectID, gomodcache) {
+				written.add(1)
+			}
+
+			return nil
+		})
+	}
+	_ = eg.Wait()
+
+	c.logger.Infof("restored %d download cache files in %s.", written.load(), time.Since(started))
+}
+
+func (c *Cache) restoreDownloadFile(ctx context.Context, f modtree.DownloadFile, objectID, gomodcache string) bool {
+	if modtree.HasDownloadFile(gomodcache, f) {
+		return false
+	}
+
+	if !c.store.Has(objectID) && !c.fetch(ctx, objectID) {
+		return false
+	}
+
+	object, _, err := c.store.Open(objectID)
+	if err != nil {
+		c.logger.Debugf("open object %s: %v", objectID, err)
+
+		return false
+	}
+	defer object.Close()
+
+	if err := modtree.RestoreDownloadFile(gomodcache, f, object); err != nil {
+		c.logger.Warnf("restore %s: %v. it will be served over the proxy instead.", f.Path(gomodcache), err)
+
+		return false
+	}
+
+	return true
+}
+
 // RestoreTrees puts every cached module back into the module cache already
 // extracted, so the go command has nothing left to unzip.
 //

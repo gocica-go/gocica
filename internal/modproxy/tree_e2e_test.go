@@ -86,11 +86,14 @@ func TestExtractedTreeSurvivesAFreshModuleCache(t *testing.T) {
 		t.Fatalf("the module was not restored in extracted form: %v", err)
 	}
 
-	// `go build` is the test, not `go mod download`: the latter fetches a
-	// module's zip unconditionally, while the former uses the extracted directory
-	// and never asks for one. With upstream refusing everything, only the restored
-	// tree can carry this.
+	// `go build` needs only the extracted tree.
 	runGo(t, goBin, project, env(second), "build", "./...")
+
+	// `go mod download` needs the zip as well -- it fetches one whether or not the
+	// module is extracted -- so restoring the download cache is what makes it free
+	// rather than merely fast. Upstream is still refusing everything.
+	cache.RestoreDownloadCache(t.Context(), second)
+	runGo(t, goBin, project, env(second), "mod", "download", testModule)
 }
 
 func startDaemonWith(t *testing.T, cache *modproxy.Cache, upstream *url.URL) *modproxy.Daemon {

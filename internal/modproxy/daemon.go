@@ -219,10 +219,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.server.cache.Prefetch(prefetchCtx, d.prefetch)
 		}
 
-		// Putting the modules back already extracted is the whole point of having
-		// them locally: it is what turns `go mod download` into a no-op instead of
-		// an unzip of the entire module set.
+		// Trees first: they carry the ziphash, and a zip whose ziphash is already
+		// present is one `go mod download` neither fetches nor hashes.
 		d.server.cache.RestoreTrees(prefetchCtx, d.gomodcache)
+		d.server.cache.RestoreDownloadCache(prefetchCtx, d.gomodcache)
 
 		// The build cache is warmed after the caller has been told the module side
 		// is ready, so `go mod download` does not wait on it.
