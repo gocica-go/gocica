@@ -313,8 +313,13 @@ func (c *Cache) forget(path string) {
 
 // Prefetch pulls every indexed object into the local store in the background.
 //
-// Requests that arrive for an object still in flight join its transfer through
-// the same singleflight, so this never duplicates work or races a live request.
+// This mirrors what the build cache does: start transferring before anything is
+// asked for, rather than waiting for the go command to ask. A request that
+// arrives for an object still in flight joins that transfer through the same
+// singleflight and is answered the moment it finishes -- it neither starts a
+// second transfer nor falls through to upstream. A request for an object the
+// prefetch has not reached yet starts its own transfer immediately, so nothing
+// ever waits behind the prefetch queue.
 func (c *Cache) Prefetch(ctx context.Context, concurrency int) {
 	if c.downloader == nil {
 		return

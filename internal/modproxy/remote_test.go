@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	v1 "github.com/mazrean/gocica/internal/proto/gocica/v1"
 	"github.com/mazrean/gocica/internal/remote/core"
@@ -20,12 +21,25 @@ import (
 type blobClient struct {
 	blob  []byte
 	reads atomic.Int64
+	// gate, when non-nil, holds every read until it is closed.
+	gate chan struct{}
+	// started is signalled once per read, before the gate is consulted.
+	started chan struct{}
 }
 
 func (c *blobClient) GetURL(context.Context) (string, error) { return "blob://test", nil }
 
 func (c *blobClient) DownloadBlock(_ context.Context, offset, size int64, w io.Writer) error {
 	c.reads.Add(1)
+	if c.started != nil {
+		select {
+		case c.started <- struct{}{}:
+		default:
+		}
+	}
+	if c.gate != nil {
+		<-c.gate
+	}
 	_, err := w.Write(c.blob[offset : offset+size])
 
 	return err
@@ -194,4 +208,63 @@ func TestCache_PrefetchDisabledWithoutDownloader(t *testing.T) {
 
 	// Must not panic on a local-only cache.
 	cache.Prefetch(t.Context(), 4)
+}
+
+func TestCache_RequestJoinsAnInFlightPrefetch(t *testing.T) {
+	t.Parallel()
+
+	const path = "example.com/m/@v/v1.0.0.zip"
+	content := bytes.Repeat([]byte("zip"), 1000)
+
+	client := newBlob(t, map[string][]byte{path: content}, "")
+	client.gate = make(chan struct{})
+	client.started = make(chan struct{}, 1)
+
+	cache := newRemoteCache(t, client)
+
+	prefetched := make(chan struct{})
+	go func() {
+		defer close(prefetched)
+		cache.Prefetch(t.Context(), 4)
+	}()
+
+	// Wait until the prefetch is actually transferring this object.
+	select {
+	case <-client.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("prefetch never started a transfer")
+	}
+
+	// A request arriving now must join that transfer rather than start a second
+	// one, and must answer as soon as it finishes.
+	got := make(chan bool, 1)
+	go func() {
+		f, _, ok := cache.Get(t.Context(), path)
+		if ok {
+			_ = f.Close()
+		}
+		got <- ok
+	}()
+
+	select {
+	case <-got:
+		t.Fatal("the request answered before the transfer completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(client.gate)
+
+	select {
+	case ok := <-got:
+		if !ok {
+			t.Error("the request did not get the object")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request never answered")
+	}
+	<-prefetched
+
+	if reads := client.reads.Load(); reads != 1 {
+		t.Errorf("the object was transferred %d times, want 1", reads)
+	}
 }
