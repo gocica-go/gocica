@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -70,6 +72,7 @@ type UploadClient interface {
 
 type BaseBlobProvider interface {
 	IsEmpty() bool
+	GetEntries(ctx context.Context) (entries map[string]*v1.IndexEntry, err error)
 	GetOutputs(ctx context.Context) (outputs []*v1.ActionsOutput, err error)
 	GetOutputBlockURL(ctx context.Context) (url string, offset, size int64, err error)
 }
@@ -112,6 +115,61 @@ func (u *Uploader) generateBlockID() (string, error) {
 
 const maxUploadChunkSize = 4 * (1 << 20)
 
+// baseRun is a maximal contiguous stretch of retained base outputs.
+type baseRun struct {
+	offset int64
+	size   int64
+}
+
+// retainedBase drops outputs the base index no longer references, and returns
+// what is left as contiguous runs plus the outputs with compacted offsets.
+//
+// Index entries are pruned by age, but the outputs they pointed at were copied
+// forward unconditionally, so an orphan lived in the blob forever. That was
+// tolerable for compile artifacts and is not for module zips.
+func retainedBase(entries map[string]*v1.IndexEntry, outputs []*v1.ActionsOutput) ([]baseRun, []*v1.ActionsOutput, int64) {
+	referenced := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		referenced[entry.OutputId] = struct{}{}
+	}
+
+	sorted := slices.Clone(outputs)
+	slices.SortFunc(sorted, func(x, y *v1.ActionsOutput) int {
+		return cmp.Compare(x.Offset, y.Offset)
+	})
+
+	var (
+		runs      []baseRun
+		kept      []*v1.ActionsOutput
+		compacted int64
+	)
+	for _, output := range sorted {
+		if _, ok := referenced[output.Id]; !ok {
+			continue
+		}
+
+		// Zero-size outputs occupy no bytes, so they never join a run.
+		if output.Size > 0 {
+			if n := len(runs); n > 0 && runs[n-1].offset+runs[n-1].size == output.Offset {
+				runs[n-1].size += output.Size
+			} else {
+				runs = append(runs, baseRun{offset: output.Offset, size: output.Size})
+			}
+		}
+
+		copied := &v1.ActionsOutput{
+			Id:          output.Id,
+			Offset:      compacted,
+			Size:        output.Size,
+			Compression: output.Compression,
+		}
+		compacted += output.Size
+		kept = append(kept, copied)
+	}
+
+	return runs, kept, compacted
+}
+
 func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	if baseBlobProvider.IsEmpty() || u.client == nil {
 		return func() ([]string, int64, []*v1.ActionsOutput, error) {
@@ -124,43 +182,46 @@ func (u *Uploader) setupBase(baseBlobProvider BaseBlobProvider) waitBaseFunc {
 	var (
 		baseBlockIDs   []string
 		baseOutputSize int64
+		baseOutputs    []*v1.ActionsOutput
 	)
 	eg.Go(func() error {
-		url, offset, size, err := baseBlobProvider.GetOutputBlockURL(ctx)
+		entries, err := baseBlobProvider.GetEntries(ctx)
+		if err != nil {
+			return fmt.Errorf("get entries: %w", err)
+		}
+
+		outputs, err := baseBlobProvider.GetOutputs(ctx)
+		if err != nil {
+			return fmt.Errorf("download outputs: %w", err)
+		}
+
+		url, offset, _, err := baseBlobProvider.GetOutputBlockURL(ctx)
 		if err != nil {
 			return fmt.Errorf("get output block URL: %w", err)
 		}
-		baseOutputSize = size
 
-		var uploadSize int64
-		for i := int64(0); i < size; i += uploadSize {
-			baseBlockID, err := u.generateBlockID()
-			if err != nil {
-				return fmt.Errorf("generate block ID: %w", err)
-			}
-			baseBlockIDs = append(baseBlockIDs, baseBlockID)
+		var runs []baseRun
+		runs, baseOutputs, baseOutputSize = retainedBase(entries, outputs)
+		u.logger.Debugf("base: keeping %d of %d outputs in %d runs, %d bytes", len(baseOutputs), len(outputs), len(runs), baseOutputSize)
 
-			chunkUploadSize := min(maxUploadChunkSize, size-i)
-			uploadSize = chunkUploadSize
-			eg.Go(func() error {
-				err = u.client.UploadBlockFromURL(ctx, baseBlockID, url, offset+i, chunkUploadSize)
+		for _, run := range runs {
+			for i := int64(0); i < run.size; i += maxUploadChunkSize {
+				baseBlockID, err := u.generateBlockID()
 				if err != nil {
-					return fmt.Errorf("upload block from URL: %w", err)
+					return fmt.Errorf("generate block ID: %w", err)
 				}
+				baseBlockIDs = append(baseBlockIDs, baseBlockID)
 
-				return nil
-			})
-		}
+				chunkOffset := offset + run.offset + i
+				chunkSize := min(int64(maxUploadChunkSize), run.size-i)
+				eg.Go(func() error {
+					if err := u.client.UploadBlockFromURL(ctx, baseBlockID, url, chunkOffset, chunkSize); err != nil {
+						return fmt.Errorf("upload block from URL: %w", err)
+					}
 
-		return nil
-	})
-
-	var baseOutputs []*v1.ActionsOutput
-	eg.Go(func() error {
-		var err error
-		baseOutputs, err = baseBlobProvider.GetOutputs(ctx)
-		if err != nil {
-			return fmt.Errorf("download outputs: %w", err)
+					return nil
+				})
+			}
 		}
 
 		return nil
