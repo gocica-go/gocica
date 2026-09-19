@@ -101,6 +101,12 @@ func (c *Cache) RestoreTrees(ctx context.Context, gomodcache string) {
 }
 
 func (c *Cache) restoreTree(ctx context.Context, m modtree.Module, objectID, gomodcache string) bool {
+	// Already there and complete: replacing it would only race whatever put it
+	// there, and the go command is happy either way.
+	if modtree.IsExtracted(gomodcache, m) {
+		return false
+	}
+
 	if !c.store.Has(objectID) && !c.fetch(ctx, objectID) {
 		return false
 	}

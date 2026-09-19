@@ -227,3 +227,68 @@ func TestModulePaths(t *testing.T) {
 		t.Errorf("ziphashPath = %q, want %q", got, want)
 	}
 }
+
+func TestUnpackReplacesAReadOnlyTree(t *testing.T) {
+	t.Parallel()
+
+	source := extractedModule(t, true, false)
+	buf := &bytes.Buffer{}
+	if err := Pack(source, testModule, buf); err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+
+	dest := extractedModule(t, true, false)
+	// The go command seals extracted directories, and a sealed directory's
+	// entries cannot be unlinked. Deleting in place therefore fails partway and
+	// leaves a tree that still has its ziphash -- which the go command trusts and
+	// then cannot build from.
+	sealed := filepath.Join(testModule.Dir(dest), "internal")
+	if err := os.Chmod(sealed, 0555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0755) })
+
+	if err := Unpack(dest, testModule, buf); err != nil {
+		t.Fatalf("unpack over a read-only tree: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(testModule.Dir(dest), "internal", "deep", "x.go"))
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if string(content) != "package deep\n" {
+		t.Errorf("restored content = %q", content)
+	}
+}
+
+func TestIsExtracted(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		withZiphash bool
+		withPartial bool
+		want        bool
+	}{
+		{name: "complete", withZiphash: true, want: true},
+		// The go command re-extracts without a ziphash, and refuses a tree with a
+		// .partial marker, so neither counts as extracted.
+		{name: "no ziphash", withZiphash: false, want: false},
+		{name: "interrupted", withZiphash: true, withPartial: true, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := extractedModule(t, tt.withZiphash, tt.withPartial)
+			if got := IsExtracted(dir, testModule); got != tt.want {
+				t.Errorf("IsExtracted = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	if IsExtracted(t.TempDir(), testModule) {
+		t.Error("an empty module cache must not look extracted")
+	}
+}

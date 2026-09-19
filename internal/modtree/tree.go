@@ -64,6 +64,23 @@ func (m Module) partialPath(gomodcache string) string {
 		filepath.FromSlash(m.EscapedPath), "@v", m.EscapedVersion+".partial")
 }
 
+// IsExtracted reports whether the go command would already treat the module as
+// extracted, by the same three checks it makes itself.
+func IsExtracted(gomodcache string, m Module) bool {
+	info, err := os.Stat(m.Dir(gomodcache))
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	if _, err := os.Stat(m.partialPath(gomodcache)); err == nil {
+		return false
+	}
+	if _, err := os.Stat(m.ziphashPath(gomodcache)); err != nil {
+		return false
+	}
+
+	return true
+}
+
 // Pack writes the module's extracted tree and its h1: hash to w as a tar
 // archive. It reports fs.ErrNotExist when the module is not extracted, or is
 // extracted but not trustworthy.
@@ -190,7 +207,7 @@ func Unpack(gomodcache string, m Module, r io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("create staging directory: %w", err)
 	}
-	defer os.RemoveAll(staging)
+	defer removeTree(staging)
 
 	var ziphash []byte
 	tr := tar.NewReader(r)
@@ -239,11 +256,31 @@ func Unpack(gomodcache string, m Module, r io.Reader) error {
 	// Sealing them the way an ordinary extraction does would only make the tree
 	// harder to replace or clean later, and the go command does not look at the
 	// modes -- it looks for the directory, the missing .partial and the ziphash.
-	if err := os.RemoveAll(final); err != nil {
-		return fmt.Errorf("clear existing module directory: %w", err)
+
+	// Swap rather than delete-then-move. Deleting in place is not atomic: the go
+	// command writes module directories read-only, so a removal can fail partway
+	// and leave a half-deleted tree that still has its ziphash -- which the go
+	// command would then trust and fail to build from. Renaming the old tree
+	// aside needs write permission on the parent directory, not on the tree, so
+	// it works regardless of how the old one was sealed.
+	var displaced string
+	if _, err := os.Lstat(final); err == nil {
+		displaced, err = swapAside(final)
+		if err != nil {
+			return err
+		}
 	}
+
 	if err := os.Rename(staging, final); err != nil {
+		if displaced != "" {
+			_ = os.Rename(displaced, final)
+		}
+
 		return fmt.Errorf("move module directory into place: %w", err)
+	}
+
+	if displaced != "" {
+		removeTree(displaced)
 	}
 
 	if err := writeZiphash(m.ziphashPath(gomodcache), ziphash); err != nil {
@@ -306,6 +343,38 @@ func writeZiphash(target string, ziphash []byte) error {
 	}
 
 	return nil
+}
+
+// swapAside renames an existing tree out of the way and returns its new path.
+func swapAside(final string) (string, error) {
+	displaced, err := os.MkdirTemp(filepath.Dir(final), ".gocica-old-")
+	if err != nil {
+		return "", fmt.Errorf("create replacement directory: %w", err)
+	}
+	// MkdirTemp made the name; rename needs it free.
+	if err := os.Remove(displaced); err != nil {
+		return "", fmt.Errorf("clear replacement directory: %w", err)
+	}
+
+	if err := os.Rename(final, displaced); err != nil {
+		return "", fmt.Errorf("move existing module directory aside: %w", err)
+	}
+
+	return displaced, nil
+}
+
+// removeTree deletes a module tree, making directories writable first: the go
+// command leaves them read-only, and a directory must be writable for its
+// entries to be unlinked.
+func removeTree(root string) {
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(p, 0755)
+		}
+
+		return nil
+	})
+	_ = os.RemoveAll(root)
 }
 
 // safeJoin refuses an archive entry that would write outside root.

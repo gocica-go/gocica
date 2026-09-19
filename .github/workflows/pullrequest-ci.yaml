@@ -120,9 +120,10 @@ jobs:
           mkdir -p ./tmp
           nohup ./${{ env.APP_NAME }} serve --dir=/tmp/gocica --export-github-env \
             > ./tmp/proxy.log 2>&1 &
-          for _ in $(seq 1 300); do
+          for _ in $(seq 1 3000); do
             url=$(python3 -c "import json,sys;print(json.load(open('/tmp/gocica/mod/proxy.json'))['url'])" 2>/dev/null) || { sleep 0.1; continue; }
-            if curl -fsS "$url/-/healthz"; then
+            # Readiness, not liveness: the daemon is still restoring modules.
+            if curl -fsS "$url/-/healthz" | grep -q '"ready":true'; then
               exit 0
             fi
             sleep 0.1

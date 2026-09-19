@@ -61,16 +61,22 @@ if [ "$USE_GOCICA" = "1" ]; then
     nohup "$GOCICA_BIN" serve --dir="$GOCICA_DIR" > "$METRICS_DIR/proxy-$SCENARIO-$REP.log" 2>&1 &
 
     local state="$GOCICA_DIR/mod/proxy.json"
-    for _ in $(seq 1 150); do
+    # Waits for readiness, not just liveness: the daemon restores modules into
+    # GOMODCACHE in extracted form, and starting the go command before that
+    # finishes would have it extracting into the same directories.
+    for _ in $(seq 1 3000); do
       if [ -f "$state" ]; then
-        local url
+        local url health
         url=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['url'])" "$state")
-        if curl -fsS "$url/-/healthz" > /dev/null 2>&1; then
+        health=$(curl -fsS "$url/-/healthz" 2>/dev/null || true)
+        case "$health" in
+        *'"ready":true'*)
           echo "GOPROXY_URL=$url" >> "$GITHUB_ENV"
           export GOPROXY_URL="$url"
 
           return 0
-        fi
+          ;;
+        esac
       fi
       sleep 0.1
     done

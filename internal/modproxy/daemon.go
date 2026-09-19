@@ -72,6 +72,13 @@ type Daemon struct {
 	stop     chan struct{}
 	flushed  chan struct{}
 	flushErr error
+
+	// ready closes once the caches are warm. The go command must not start
+	// before then: restoring extracted modules into GOMODCACHE while the go
+	// command is extracting into the same directories is a race, and the point of
+	// restoring them is that the go command never has to extract at all.
+	readyOnce sync.Once
+	ready     chan struct{}
 }
 
 // NewDaemon binds the listen address.
@@ -99,6 +106,7 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 		gomodcache: config.GoModCache,
 		stop:       make(chan struct{}),
 		flushed:    make(chan struct{}),
+		ready:      make(chan struct{}),
 	}
 	daemon.httpSrv = &http.Server{
 		Handler:           server,
@@ -107,6 +115,23 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 	server.SetLifecycle(daemon)
 
 	return daemon, nil
+}
+
+// markReady announces that the module cache is warm.
+func (d *Daemon) markReady() {
+	d.readyOnce.Do(func() {
+		close(d.ready)
+	})
+}
+
+// Ready reports whether the module cache is warm, for the readiness endpoint.
+func (d *Daemon) Ready() bool {
+	select {
+	case <-d.ready:
+		return true
+	default:
+		return false
+	}
 }
 
 // SetAfterPrefetch installs work to run once the module prefetch has finished.
@@ -188,6 +213,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}()
 
 	go func() {
+		defer d.markReady()
+
 		if d.prefetch >= 0 {
 			d.server.cache.Prefetch(prefetchCtx, d.prefetch)
 		}
@@ -196,6 +223,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		// them locally: it is what turns `go mod download` into a no-op instead of
 		// an unzip of the entire module set.
 		d.server.cache.RestoreTrees(prefetchCtx, d.gomodcache)
+
+		// The build cache is warmed after the caller has been told the module side
+		// is ready, so `go mod download` does not wait on it.
+		d.markReady()
 
 		// Only now: `go mod download` runs before `go build`, so modules are on the
 		// critical path first. Running both transfers at once simply made the one

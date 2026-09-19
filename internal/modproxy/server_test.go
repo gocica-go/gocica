@@ -248,7 +248,7 @@ func TestServer_Healthz(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", res.StatusCode)
 	}
-	if want := "{\"ok\":true,\"stored\":0}\n"; string(body) != want {
+	if want := "{\"ok\":true,\"ready\":false,\"stored\":0}\n"; string(body) != want {
 		t.Errorf("body = %q, want %q", body, want)
 	}
 }

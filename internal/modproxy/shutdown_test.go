@@ -16,11 +16,14 @@ import (
 
 type fakeLifecycle struct {
 	stopped  atomic.Bool
+	ready    atomic.Bool
 	release  chan struct{}
 	flushErr error
 }
 
 func (f *fakeLifecycle) Stop() { f.stopped.Store(true) }
+
+func (f *fakeLifecycle) Ready() bool { return f.ready.Load() }
 
 func (f *fakeLifecycle) WaitFlush(ctx context.Context) error {
 	select {
@@ -170,5 +173,27 @@ func TestCache_StoreAfterFlushIsNotIndexed(t *testing.T) {
 	// Indexing it would publish an entry whose bytes never reached the blob.
 	if _, ok := cache.entries["example.com/m/@v/v1.0.0.zip"]; ok {
 		t.Error("an object stored after the flush must not enter the index")
+	}
+}
+
+func TestServer_HealthzReportsReadiness(t *testing.T) {
+	t.Parallel()
+
+	life := &fakeLifecycle{release: make(chan struct{})}
+	proxy := newShutdownServer(t, life)
+
+	// The caller needs the address as soon as the socket is up, but must not
+	// start the go command until the module cache is warm: restoring extracted
+	// modules while the go command extracts into the same directories is a race.
+	_, body := get(t, proxy.URL, healthzPath)
+	if !strings.Contains(string(body), `"ready":false`) {
+		t.Errorf("body = %q, want ready false before the caches are warm", body)
+	}
+
+	life.ready.Store(true)
+
+	_, body = get(t, proxy.URL, healthzPath)
+	if !strings.Contains(string(body), `"ready":true`) {
+		t.Errorf("body = %q, want ready true once the caches are warm", body)
 	}
 }

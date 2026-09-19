@@ -35,10 +35,13 @@ type Server struct {
 	lifecycle  Lifecycle
 }
 
-// Lifecycle is the part of the daemon the shutdown endpoint drives.
+// Lifecycle is the part of the daemon the control endpoints drive.
 type Lifecycle interface {
 	Stop()
 	WaitFlush(ctx context.Context) error
+	// Ready reports whether the caches are warm enough for the go command to
+	// start.
+	Ready() bool
 }
 
 // NewServer builds the proxy handler. A nil upstream turns every miss into a 404,
@@ -105,8 +108,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	// Liveness and readiness are separate: a caller needs the address as soon as
+	// the socket is up, but must not start the go command until the module cache
+	// is warm, or it will extract modules into the very directories the daemon is
+	// restoring.
+	ready := s.lifecycle != nil && s.lifecycle.Ready()
+
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, "{\"ok\":true,\"stored\":%d}\n", s.cache.Stored())
+	fmt.Fprintf(w, "{\"ok\":true,\"ready\":%t,\"stored\":%d}\n", ready, s.cache.Stored())
 }
 
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
