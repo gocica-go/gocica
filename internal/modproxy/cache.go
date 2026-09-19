@@ -350,12 +350,13 @@ func (c *Cache) Prefetch(ctx context.Context, concurrency int) {
 	// most of the index is missing locally, which is the ordinary warm start.
 	if len(objectIDs) > c.downloaderOutputCount()/2 {
 		c.logger.Infof("prefetching %d module objects in blob order.", len(objectIDs))
-		if err := c.bulkPrefetch(ctx, objectIDs); err == nil {
+		err := c.bulkPrefetch(ctx, objectIDs)
+		if err == nil || ctx.Err() != nil {
 			return
-		} else {
-			c.logger.Warnf("bulk prefetch: %v. falling back to per-object prefetch.", err)
-			objectIDs = c.indexedObjects()
 		}
+
+		c.logger.Warnf("bulk prefetch: %v. falling back to per-object prefetch.", err)
+		objectIDs = c.indexedObjects()
 	}
 
 	c.logger.Infof("prefetching %d module objects with %d workers.", len(objectIDs), concurrency)
