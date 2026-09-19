@@ -45,7 +45,7 @@ type serveCmd struct {
 	PrewarmBuild    bool          `kong:"name='prewarm-build-cache',default='true',negatable,help='Also pull the build cache onto local disk while the daemon is idle, so the first go command does not pay for it.',env='GOCICA_MODULE_PROXY_PREWARM_BUILD_CACHE'"`
 	StateFile       string        `kong:"help='Where to record the URL and pid. Defaults to <dir>/mod/proxy.json.',env='GOCICA_MODULE_PROXY_STATE_FILE'"`
 	Prefetch        int           `kong:"default='24',help='How many cached modules to pull from the remote at once on startup. 0 uses the default, a negative value disables prefetching.',env='GOCICA_MODULE_PROXY_PREFETCH'"`
-	TreeCache       bool          `kong:"name='extracted-module-cache',default='true',negatable,help='Restore modules into GOMODCACHE already extracted, so the go command has nothing to unzip.',env='GOCICA_MODULE_PROXY_EXTRACTED_CACHE'"`
+	TreeCache       bool          `kong:"name='extracted-module-cache',negatable,help='Restore modules into GOMODCACHE already extracted and prefill the download cache. Off by default: measured, it is a wash on a warm run and costs ~400MB of extra transfer, because both the zips and the trees end up in the blob.',env='GOCICA_MODULE_PROXY_EXTRACTED_CACHE'"`
 	GoModCache      string        `kong:"help='Module cache to restore extracted modules into. Defaults to go env GOMODCACHE.',env='GOCICA_MODULE_PROXY_GOMODCACHE'"`
 }
 
