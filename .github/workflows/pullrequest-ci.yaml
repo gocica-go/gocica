@@ -90,6 +90,53 @@ jobs:
         with:
           name: metrics
           path: ./tmp
+  traq_module_proxy:
+    name: Build traQ (module proxy)
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: traPtitech/traQ
+          ref: v3.22.0
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.24.1
+          # The point of this job: GoCICa serves the module cache too, so
+          # setup-go's has to be unnecessary.
+          cache: false
+      - run: go clean -cache -modcache
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.APP_NAME }}
+      - name: Fix permissions # ref: https://github.com/actions/download-artifact?tab=readme-ov-file#permission-loss
+        run: chmod +x ./${{ env.APP_NAME }}
+      - name: Expose GitHub Actions runtime environment variables
+        uses: crazy-max/ghaction-github-runtime@v4
+      - name: Start the module proxy
+        run: |
+          mkdir -p ./tmp
+          nohup ./${{ env.APP_NAME }} serve --dir=/tmp/gocica --export-github-env \
+            > ./tmp/proxy.log 2>&1 &
+          for _ in $(seq 1 150); do
+            url=$(python3 -c "import json,sys;print(json.load(open('/tmp/gocica/mod/proxy.json'))['url'])" 2>/dev/null) || { sleep 0.1; continue; }
+            curl -fsS "$url/-/healthz" && break
+            sleep 0.1
+          done
+      - run: go mod download
+      - run: time go build -o traQ -ldflags "-s -w -X main.version=Dev -X main.revision=Local"
+        env:
+          CGO_ENABLED: 0
+          GOCACHEPROG: './${{ env.APP_NAME }} --dir=/tmp/gocica'
+      - name: Flush the module cache
+        if: always()
+        run: ./${{ env.APP_NAME }} proxy-stop --dir=/tmp/gocica
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: module-proxy-log
+          path: ./tmp/proxy.log
   test:
     name: Test
     runs-on: ubuntu-latest
