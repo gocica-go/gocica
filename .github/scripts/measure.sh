@@ -98,7 +98,13 @@ if [ -n "${GOFLAGS_EXTRA:-}" ]; then
   echo "GOFLAGS=$GOFLAGS"
 fi
 
-phase mod_download go mod download
+# BUILD_ONLY skips it. `go mod download` fetches every module's zip whether or
+# not the module is already extracted (cmd/go/internal/modcmd/download.go), so a
+# workflow that only builds never pays for the zips at all -- which is where the
+# extracted-module cache actually shows.
+if [ "${BUILD_ONLY:-0}" != "1" ]; then
+  phase mod_download go mod download
+fi
 
 if [ "$USE_GOCICA" = "1" ]; then
   # Only the build runs under GOCACHEPROG. `go mod download` also touches the

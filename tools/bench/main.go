@@ -234,20 +234,17 @@ func writeWallTable(out *strings.Builder, jobs []job, baseline string) {
 }
 
 // baselineFor pairs a scenario with the baseline measured under the same
-// conditions: a "-dep" scenario belongs against the "-dep" baseline, not against
-// the one whose go.sum never changed.
+// conditions. Scenario names are "<tool>" or "<tool>-<variant>", and a variant
+// only means anything against the same variant: comparing a run whose go.sum
+// changed against one whose did not would say nothing about either.
 func baselineFor(scenario, baseline string) string {
-	if suffix, ok := strings.CutPrefix(scenario, baseline); ok && suffix == "" {
+	_, variant, ok := strings.Cut(scenario, "-")
+	if !ok {
 		return baseline
 	}
-	if strings.HasSuffix(scenario, depSuffix) {
-		return baseline + depSuffix
-	}
 
-	return baseline
+	return baseline + "-" + variant
 }
-
-const depSuffix = "-dep"
 
 // scenarioOf pulls the scenario and repetition out of a matrix job name such as
 // "measure (gocica, 3)".
