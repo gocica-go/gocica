@@ -209,3 +209,53 @@ func (d *Downloader) DownloadAllOutputBlocks(ctx context.Context, objectWriterFu
 
 	return nil
 }
+
+// Output returns the blob entry for an object ID.
+func (d *Downloader) Output(id string) (*v1.ActionsOutput, bool) {
+	for _, output := range d.header.Outputs {
+		if output.Id == id {
+			return output, true
+		}
+	}
+
+	return nil, false
+}
+
+// DownloadOutput fetches a single output by range and writes its decompressed
+// bytes to w.
+//
+// This is the counterpart of DownloadAllOutputBlocks for callers that only need a
+// few objects out of a large blob. The build cache wants everything, so it uses
+// the bulk path; the module proxy only needs the modules this build actually
+// imports, which is a fraction of the module graph.
+func (d *Downloader) DownloadOutput(ctx context.Context, output *v1.ActionsOutput, w io.Writer) error {
+	if d.client == nil {
+		return errors.New("no download client")
+	}
+
+	if output.Size == 0 {
+		return nil
+	}
+
+	var closeFunc func() error
+	if output.Compression == v1.Compression_COMPRESSION_ZSTD {
+		dw := zstd.NewDecompressWriter(w)
+		w, closeFunc = dw, dw.Close
+	}
+
+	if err := d.client.DownloadBlock(ctx, d.headerSize+output.Offset, output.Size, w); err != nil {
+		if closeFunc != nil {
+			_ = closeFunc()
+		}
+
+		return fmt.Errorf("download block: %w", err)
+	}
+
+	if closeFunc != nil {
+		if err := closeFunc(); err != nil {
+			return fmt.Errorf("close decompress writer: %w", err)
+		}
+	}
+
+	return nil
+}

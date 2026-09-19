@@ -3,6 +3,7 @@ package kessoku
 import (
 	"github.com/mazrean/gocica/internal/cacheprog"
 	"github.com/mazrean/gocica/internal/local"
+	"github.com/mazrean/gocica/internal/modproxy"
 	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/internal/remote/provider"
@@ -44,4 +45,27 @@ var _ = kessoku.Inject[*protocol.Process](
 	kessoku.Provide(cacheprog.NewCacheProg),
 
 	kessoku.Provide(NewProcessWithOptions),
+)
+
+// InitializeModuleProxy builds the GOPROXY daemon.
+//
+// It is a separate injector on purpose. InitializeProcess is all-or-nothing: any
+// provider error there leaves main with a handler-less Process, i.e. no caching
+// at all. Wiring the module proxy into the same graph would let a proxy problem
+// take the build cache down with it, and vice versa.
+var _ = kessoku.Inject[*modproxy.Daemon](
+	"InitializeModuleProxy",
+	kessoku.Async(kessoku.Provide(modproxy.NewStore)),
+	kessoku.Provide(modproxy.NewCompressionRegistry),
+	kessoku.Provide(modproxy.NewCompressionPolicy),
+
+	kessoku.Async(kessoku.Bind[core.BaseBlobProvider](kessoku.Provide(core.NewDownloader))),
+	kessoku.Async(kessoku.Provide(core.NewUploader)),
+	kessoku.Async(kessoku.Provide(provider.DownloadClientProviderExecutor)),
+	kessoku.Async(kessoku.Provide(provider.UploadClientProviderExecutor)),
+	kessoku.Provide(provider.Switch),
+
+	kessoku.Provide(modproxy.NewCache),
+	kessoku.Provide(modproxy.NewServer),
+	kessoku.Provide(modproxy.NewDaemon),
 )

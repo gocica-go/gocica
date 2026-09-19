@@ -6,6 +6,7 @@ import (
 	"context"
 	"github.com/mazrean/gocica/internal/cacheprog"
 	"github.com/mazrean/gocica/internal/local"
+	"github.com/mazrean/gocica/internal/modproxy"
 	"github.com/mazrean/gocica/internal/remote"
 	"github.com/mazrean/gocica/internal/remote/core"
 	"github.com/mazrean/gocica/internal/remote/provider"
@@ -13,6 +14,7 @@ import (
 	"github.com/mazrean/gocica/protocol"
 	"github.com/mazrean/kessoku"
 	"golang.org/x/sync/errgroup"
+	"net/url"
 )
 
 func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.DiskDir, ghacacheConfig *provider.GHACacheConfig) (*protocol.Process, error) {
@@ -124,4 +126,104 @@ func InitializeProcess(ctx context.Context, logger log.Logger, diskDir local.Dis
 		return nil, err
 	}
 	return process, nil
+}
+func InitializeModuleProxy(ctx0 context.Context, logger0 log.Logger, daemonConfig modproxy.DaemonConfig, url0 *url.URL, storeDir modproxy.StoreDir, ghacacheConfig0 *provider.GHACacheConfig) (*modproxy.Daemon, error) {
+	var (
+		compressionRegistry     *modproxy.CompressionRegistry
+		compressionPolicy0      core.CompressionPolicy
+		compressionPolicyCh0    = make(chan struct{})
+		store                   *modproxy.Store
+		downloadClientProvider0 provider.DownloadClientProvider
+		uploadClientProvider0   provider.UploadClientProvider
+		uploadClientProviderCh  = make(chan struct{})
+		downloadClient0         core.DownloadClient
+		uploadClient0           core.UploadClient
+		uploadClientCh0         = make(chan struct{})
+		downloader0             *core.Downloader
+		downloaderCh0           = make(chan struct{})
+		uploader0               *core.Uploader
+		uploaderCh              = make(chan struct{})
+		cache                   *modproxy.Cache
+		server                  *modproxy.Server
+		daemon                  *modproxy.Daemon
+	)
+	eg, ctx := errgroup.WithContext(ctx0)
+	eg.Go(func() error {
+		select {
+		case <-uploadClientProviderCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		var err6 error
+		uploadClient0, err6 = kessoku.Async(kessoku.Provide(provider.UploadClientProviderExecutor)).Fn()(ctx0, uploadClientProvider0)
+		if err6 != nil {
+			return err6
+		}
+		close(uploadClientCh0)
+		return nil
+	})
+	eg.Go(func() error {
+		for _, ch := range []<-chan struct{}{uploadClientCh0, downloaderCh0, compressionPolicyCh0} {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		uploader0 = kessoku.Async(kessoku.Provide(core.NewUploader)).Fn()(ctx0, logger0, uploadClient0, downloader0, compressionPolicy0)
+		close(uploaderCh)
+		return nil
+	})
+	compressionRegistry = kessoku.Provide(modproxy.NewCompressionRegistry).Fn()()
+	compressionPolicy0 = kessoku.Provide(modproxy.NewCompressionPolicy).Fn()(compressionRegistry)
+	close(compressionPolicyCh0)
+	var err7 error
+	store, err7 = kessoku.Async(kessoku.Provide(modproxy.NewStore)).Fn()(storeDir)
+	if err7 != nil {
+		var zero *modproxy.Daemon
+		return zero, err7
+	}
+	var err8 error
+	downloadClientProvider0, uploadClientProvider0, err8 = kessoku.Provide(provider.Switch).Fn()(ctx0, logger0, ghacacheConfig0)
+	if err8 != nil {
+		var zero *modproxy.Daemon
+		return zero, err8
+	}
+	close(uploadClientProviderCh)
+	var err9 error
+	downloadClient0, err9 = kessoku.Async(kessoku.Provide(provider.DownloadClientProviderExecutor)).Fn()(ctx0, downloadClientProvider0)
+	if err9 != nil {
+		var zero *modproxy.Daemon
+		return zero, err9
+	}
+	var err10 error
+	downloader0, err10 = kessoku.Async(kessoku.Bind[core.BaseBlobProvider](kessoku.Provide(core.NewDownloader))).Fn()(ctx0, logger0, downloadClient0)
+	if err10 != nil {
+		var zero *modproxy.Daemon
+		return zero, err10
+	}
+	close(downloaderCh0)
+	select {
+	case <-uploaderCh:
+	case <-ctx.Done():
+		var zero *modproxy.Daemon
+		return zero, ctx.Err()
+	}
+	var err11 error
+	cache, err11 = kessoku.Provide(modproxy.NewCache).Fn()(ctx0, logger0, store, downloader0, uploader0, compressionRegistry)
+	if err11 != nil {
+		var zero *modproxy.Daemon
+		return zero, err11
+	}
+	server = kessoku.Provide(modproxy.NewServer).Fn()(logger0, cache, url0)
+	var err12 error
+	daemon, err12 = kessoku.Provide(modproxy.NewDaemon).Fn()(logger0, server, daemonConfig)
+	if err12 != nil {
+		var zero *modproxy.Daemon
+		return zero, err12
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+	return daemon, nil
 }
