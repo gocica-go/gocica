@@ -1,6 +1,6 @@
-name: odjson
+name: gocica
 version: 0.1.0
-description: APM package for odjson
+description: APM package for GoCICa
 
 dependencies:
   apm:
