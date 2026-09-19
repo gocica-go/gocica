@@ -42,6 +42,9 @@ type DaemonConfig struct {
 	// once at startup. Zero uses the default; a negative value disables
 	// prefetching.
 	PrefetchConcurrency int
+	// GoModCache is the module cache to restore extracted modules into. Empty
+	// disables that, leaving the go command to unzip them itself.
+	GoModCache string
 }
 
 // State is the contents of the state file.
@@ -53,13 +56,14 @@ type State struct {
 
 // Daemon owns the listener and the lifecycle of a Server.
 type Daemon struct {
-	logger    log.Logger
-	server    *Server
-	listener  net.Listener
-	httpSrv   *http.Server
-	stateFile string
-	lifetime  time.Duration
-	prefetch  int
+	logger     log.Logger
+	server     *Server
+	listener   net.Listener
+	httpSrv    *http.Server
+	stateFile  string
+	lifetime   time.Duration
+	prefetch   int
+	gomodcache string
 
 	// afterPrefetch runs once the module store is warm. See Run.
 	afterPrefetch func(context.Context)
@@ -86,14 +90,15 @@ func NewDaemon(logger log.Logger, server *Server, config DaemonConfig) (*Daemon,
 	}
 
 	daemon := &Daemon{
-		logger:    logger,
-		server:    server,
-		listener:  listener,
-		stateFile: config.StateFile,
-		lifetime:  config.MaxLifetime,
-		prefetch:  config.PrefetchConcurrency,
-		stop:      make(chan struct{}),
-		flushed:   make(chan struct{}),
+		logger:     logger,
+		server:     server,
+		listener:   listener,
+		stateFile:  config.StateFile,
+		lifetime:   config.MaxLifetime,
+		prefetch:   config.PrefetchConcurrency,
+		gomodcache: config.GoModCache,
+		stop:       make(chan struct{}),
+		flushed:    make(chan struct{}),
 	}
 	daemon.httpSrv = &http.Server{
 		Handler:           server,
@@ -187,6 +192,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.server.cache.Prefetch(prefetchCtx, d.prefetch)
 		}
 
+		// Putting the modules back already extracted is the whole point of having
+		// them locally: it is what turns `go mod download` into a no-op instead of
+		// an unzip of the entire module set.
+		d.server.cache.RestoreTrees(prefetchCtx, d.gomodcache)
+
 		// Only now: `go mod download` runs before `go build`, so modules are on the
 		// critical path first. Running both transfers at once simply made the one
 		// that was needed sooner take longer.
@@ -217,6 +227,9 @@ func (d *Daemon) shutdown(ctx context.Context) error {
 	// and Cache.Flush refuses to index anything new from here on, so a request
 	// that lands during the flush cannot leave the index pointing at bytes that
 	// never made it into the blob.
+	// Before the flush, because Flush stops accepting index entries.
+	d.server.cache.PackTrees(ctx, d.gomodcache)
+
 	d.flushErr = d.server.cache.Flush(ctx)
 	close(d.flushed)
 

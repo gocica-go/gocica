@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -43,6 +45,8 @@ type serveCmd struct {
 	PrewarmBuild    bool          `kong:"name='prewarm-build-cache',default='true',negatable,help='Also pull the build cache onto local disk while the daemon is idle, so the first go command does not pay for it.',env='GOCICA_MODULE_PROXY_PREWARM_BUILD_CACHE'"`
 	StateFile       string        `kong:"help='Where to record the URL and pid. Defaults to <dir>/mod/proxy.json.',env='GOCICA_MODULE_PROXY_STATE_FILE'"`
 	Prefetch        int           `kong:"default='24',help='How many cached modules to pull from the remote at once on startup. 0 uses the default, a negative value disables prefetching.',env='GOCICA_MODULE_PROXY_PREFETCH'"`
+	TreeCache       bool          `kong:"name='extracted-module-cache',default='true',negatable,help='Restore modules into GOMODCACHE already extracted, so the go command has nothing to unzip.',env='GOCICA_MODULE_PROXY_EXTRACTED_CACHE'"`
+	GoModCache      string        `kong:"help='Module cache to restore extracted modules into. Defaults to go env GOMODCACHE.',env='GOCICA_MODULE_PROXY_GOMODCACHE'"`
 }
 
 // proxyStopCmd asks a running daemon to flush and exit.
@@ -232,6 +236,11 @@ func runServe(logger log.Logger) error {
 	moduleConfig.Prefix = provider.ModuleCachePrefix
 	moduleConfig.KeyVersion = provider.ModuleCacheVersion
 
+	var gomodcache string
+	if CLI.Serve.TreeCache {
+		gomodcache = resolveGoModCache(logger)
+	}
+
 	daemon, err := kessoku.InitializeModuleProxy(
 		ctx,
 		logger,
@@ -240,6 +249,7 @@ func runServe(logger log.Logger) error {
 			StateFile:           moduleStateFile(CLI.Serve.StateFile),
 			MaxLifetime:         CLI.Serve.MaxLifetime,
 			PrefetchConcurrency: CLI.Serve.Prefetch,
+			GoModCache:          gomodcache,
 		},
 		upstream,
 		modproxy.StoreDir(dir),
@@ -322,6 +332,31 @@ func prewarmBuildCache(ctx context.Context, logger log.Logger) {
 	if err := core.PrewarmLocal(ctx, logger, downloader, disk); err != nil {
 		logger.Warnf("prewarm the build cache: %v", err)
 	}
+}
+
+// resolveGoModCache finds the module cache to restore extracted modules into.
+//
+// Asking the go command is the only reliable answer: GOMODCACHE may come from
+// the environment, from the go env config file, or from GOPATH.
+func resolveGoModCache(logger log.Logger) string {
+	if dir := CLI.Serve.GoModCache; dir != "" {
+		return dir
+	}
+	if dir := os.Getenv("GOMODCACHE"); dir != "" {
+		return dir
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "go", "env", "GOMODCACHE").Output()
+	if err != nil {
+		logger.Warnf("resolve GOMODCACHE: %v. extracted modules will not be restored.", err)
+
+		return ""
+	}
+
+	return strings.TrimSpace(string(out))
 }
 
 func exportGithubEnv(key, value string) error {
