@@ -31,6 +31,14 @@ type blobClient struct {
 func (c *blobClient) GetURL(context.Context) (string, error) { return "blob://test", nil }
 
 func (c *blobClient) DownloadBlock(_ context.Context, offset, size int64, w io.Writer) error {
+	// The header is read speculatively from offset 0, and may ask past the end
+	// of the blob. It is not one of the object reads the tests count or gate.
+	if offset == 0 {
+		_, err := w.Write(c.blob[:min(size, int64(len(c.blob)))])
+
+		return err
+	}
+
 	c.reads.Add(1)
 	if c.started != nil {
 		select {

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -24,9 +25,27 @@ type Downloader struct {
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
+	stats      transferStats
 
 	outputIndexOnce sync.Once
 	outputIndex     map[string]*v1.ActionsOutput
+}
+
+// Speculative header reads were measured and withdrawn. The header is an
+// 8-byte length followed by the index, and reading them in one request (the
+// first 4 MiB of the blob) was meant to save a round trip. Measured on
+// ubuntu-latest the round trip is ~70ms, and the module proxy's whole
+// handshake took 0.15s; the 4 MiB read took 0.5-3.3s instead, because a single
+// fresh connection is in TCP slow start and, on a bad job, throttled -- the
+// same straggler the bulk download hedges against, only here on the critical
+// path with nothing to hedge with. So by default the two small requests stay.
+//
+// DownloaderOptions tunes a Downloader.
+type DownloaderOptions struct {
+	// SpeculativeHeaderSize is how much of the blob's head to ask for in the
+	// first request. Zero, the default, reads just the length prefix and then
+	// the index: two small requests. See the note above before raising it.
+	SpeculativeHeaderSize int64
 }
 
 // DownloadClient defines the interface for downloading blocks from remote storage.
@@ -43,13 +62,23 @@ func NewDownloader(
 	logger log.Logger,
 	client DownloadClient,
 ) (*Downloader, error) {
+	return NewDownloaderWithOptions(ctx, logger, client, DownloaderOptions{})
+}
+
+// NewDownloaderWithOptions is NewDownloader with tuning.
+func NewDownloaderWithOptions(
+	ctx context.Context,
+	logger log.Logger,
+	client DownloadClient,
+	options DownloaderOptions,
+) (*Downloader, error) {
 	downloader := &Downloader{
 		logger: logger,
 		client: client,
 	}
 
 	var err error
-	downloader.header, downloader.headerSize, err = downloader.readHeader(ctx)
+	downloader.header, downloader.headerSize, err = downloader.readHeader(ctx, options.SpeculativeHeaderSize)
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
@@ -57,7 +86,13 @@ func NewDownloader(
 	return downloader, nil
 }
 
-func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, headerSize int64, err error) {
+// headerPrefixSize is the length prefix in front of the serialized index.
+const headerPrefixSize = 8
+
+// readHeader fetches the length prefix and the index behind it. The first
+// request asks for speculate bytes (at least the prefix): when the index fits,
+// that is the only request; otherwise the rest is fetched with a second one.
+func (d *Downloader) readHeader(ctx context.Context, speculate int64) (header *v1.ActionsCache, headerSize int64, err error) {
 	if d.client == nil {
 		return &v1.ActionsCache{
 			Entries:         map[string]*v1.IndexEntry{},
@@ -66,26 +101,42 @@ func (d *Downloader) readHeader(ctx context.Context) (header *v1.ActionsCache, h
 		}, 0, nil
 	}
 
-	sizeBuf := make([]byte, 8)
-	err = d.client.DownloadBlockBuffer(ctx, 0, 8, sizeBuf)
-	if err != nil {
-		return nil, 0, fmt.Errorf("download size buffer: %w", err)
-	}
-	//nolint:gosec
-	protobufSize := int64(binary.BigEndian.Uint64(sizeBuf))
+	speculate = max(speculate, headerPrefixSize)
 
-	protoBuf := make([]byte, protobufSize)
-	err = d.client.DownloadBlockBuffer(ctx, 8, protobufSize, protoBuf)
-	if err != nil {
-		return nil, 0, fmt.Errorf("download header buffer: %w", err)
+	// A range past the end of the blob is answered with what exists, so this is
+	// safe on a blob smaller than the speculation.
+	head := &bytes.Buffer{}
+	head.Grow(int(speculate))
+	if err := d.client.DownloadBlock(ctx, 0, speculate, head); err != nil {
+		return nil, 0, fmt.Errorf("download header: %w", err)
 	}
+	if head.Len() < headerPrefixSize {
+		return nil, 0, fmt.Errorf("blob is %d bytes, shorter than the header length prefix", head.Len())
+	}
+	// An empty index marshals to nothing, so zero is a valid size.
+	//nolint:gosec
+	protobufSize := int64(binary.BigEndian.Uint64(head.Bytes()[:headerPrefixSize]))
+
+	got := head.Bytes()[headerPrefixSize:]
+	if int64(len(got)) > protobufSize {
+		got = got[:protobufSize]
+	}
+	protoBuf := make([]byte, protobufSize)
+	copy(protoBuf, got)
+	if rest := protobufSize - int64(len(got)); rest > 0 {
+		offset := headerPrefixSize + int64(len(got))
+		if err := d.client.DownloadBlockBuffer(ctx, offset, rest, protoBuf[len(got):]); err != nil {
+			return nil, 0, fmt.Errorf("download header buffer: %w", err)
+		}
+	}
+	d.logger.Debugf("blob header is %d bytes; speculated %d, second request needed: %t", protobufSize, speculate, int64(len(got)) < protobufSize)
 
 	header = &v1.ActionsCache{}
 	if err = proto.Unmarshal(protoBuf, header); err != nil {
 		return nil, 0, fmt.Errorf("unmarshal header: %w", err)
 	}
 
-	return header, 8 + int64(len(protoBuf)), nil
+	return header, headerPrefixSize + protobufSize, nil
 }
 
 func (d *Downloader) GetEntries(context.Context) (metadata map[string]*v1.IndexEntry, err error) {
@@ -219,7 +270,7 @@ func (d *Downloader) DownloadAllOutputBlocks(
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
 			d.logger.Debugf("downloading chunk: %d/%d", j, len(outputs))
-			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
+			if err := d.downloadRange(ctx, chunkOffset, chunkSize, jw); err != nil {
 				return fmt.Errorf("download block: %w", err)
 			}
 
@@ -234,6 +285,10 @@ func (d *Downloader) DownloadAllOutputBlocks(
 	if err := eg.Wait(); err != nil {
 		return err
 	}
+
+	// Ranges and bytes include any per-object DownloadOutput calls made through
+	// this Downloader, which share the link.
+	d.logger.Infof("download: %s.", d.stats.summary())
 
 	return nil
 }
@@ -278,7 +333,7 @@ func (d *Downloader) DownloadOutput(ctx context.Context, output *v1.ActionsOutpu
 		w, closeFunc = dw, dw.Close
 	}
 
-	if err := d.client.DownloadBlock(ctx, d.headerSize+output.Offset, output.Size, w); err != nil {
+	if err := d.downloadRange(ctx, d.headerSize+output.Offset, output.Size, w); err != nil {
 		if closeFunc != nil {
 			_ = closeFunc()
 		}
