@@ -50,10 +50,10 @@ on:
         required: false
         default: ''
       disk:
-        description: Where the caches live. "root" is the runner's OS disk, "mnt" its local temporary disk.
+        description: Where the caches live. "root" is the runner's OS disk, "mnt" its local temporary disk, "tmpfs" a RAM-backed mount.
         required: false
         type: choice
-        options: [root, mnt]
+        options: [root, mnt, tmpfs]
         default: root
 
 permissions:
@@ -80,9 +80,10 @@ env:
   # On the temporary disk every cache moves together: setup-go restores into
   # GOMODCACHE and GOCACHE wherever they point, and gocica's store has to share a
   # filesystem with GOMODCACHE.
-  GOMODCACHE: ${{ github.event.inputs.disk == 'mnt' && '/mnt/go/pkg/mod' || '' }}
-  GOCACHE: ${{ github.event.inputs.disk == 'mnt' && '/mnt/go-build' || '' }}
-  GOCICA_DIR: ${{ github.event.inputs.disk == 'mnt' && '/mnt/gocica' || '' }}
+  CACHE_ROOT: ${{ (github.event.inputs.disk == 'mnt' && '/mnt') || (github.event.inputs.disk == 'tmpfs' && '/home/runner/ramdisk') || '' }}
+  GOMODCACHE: ${{ (github.event.inputs.disk == 'mnt' && '/mnt/go/pkg/mod') || (github.event.inputs.disk == 'tmpfs' && '/home/runner/ramdisk/go/pkg/mod') || '' }}
+  GOCACHE: ${{ (github.event.inputs.disk == 'mnt' && '/mnt/go-build') || (github.event.inputs.disk == 'tmpfs' && '/home/runner/ramdisk/go-build') || '' }}
+  GOCICA_DIR: ${{ (github.event.inputs.disk == 'mnt' && '/mnt/gocica') || (github.event.inputs.disk == 'tmpfs' && '/home/runner/ramdisk/gocica') || '' }}
 
 jobs:
   build:
@@ -154,9 +155,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
@@ -218,9 +224,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
@@ -269,9 +280,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
@@ -326,9 +342,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
@@ -380,9 +401,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
@@ -442,9 +468,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
@@ -490,9 +521,14 @@ jobs:
             # shellcheck disable=SC2086
             sudo sysctl -w $SYSCTL
           fi
-          if [ "$DISK" = mnt ]; then
-            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
-            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          if [ "$DISK" = tmpfs ]; then
+            sudo mkdir -p "$CACHE_ROOT"
+            # Sized as a ceiling, not a reservation: tmpfs only takes what is written.
+            sudo mount -t tmpfs -o size=10g tmpfs "$CACHE_ROOT"
+          fi
+          if [ -n "$CACHE_ROOT" ]; then
+            sudo mkdir -p "$GOMODCACHE" "$GOCACHE" "$GOCICA_DIR"
+            sudo chown -R "$(id -u):$(id -g)" "$CACHE_ROOT"
           fi
       - uses: actions/setup-go@v6
         with:
