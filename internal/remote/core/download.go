@@ -25,6 +25,7 @@ type Downloader struct {
 	client     DownloadClient
 	headerSize int64
 	header     *v1.ActionsCache
+	stats      transferStats
 
 	outputIndexOnce sync.Once
 	outputIndex     map[string]*v1.ActionsOutput
@@ -273,7 +274,7 @@ func (d *Downloader) DownloadAllOutputBlocks(
 			jw := myio.NewJoinedWriter(chunkWriters...)
 
 			d.logger.Debugf("downloading chunk: %d/%d", j, len(outputs))
-			if err := d.client.DownloadBlock(ctx, chunkOffset, chunkSize, jw); err != nil {
+			if err := d.downloadRange(ctx, chunkOffset, chunkSize, jw); err != nil {
 				return fmt.Errorf("download block: %w", err)
 			}
 
@@ -288,6 +289,10 @@ func (d *Downloader) DownloadAllOutputBlocks(
 	if err := eg.Wait(); err != nil {
 		return err
 	}
+
+	// Ranges and bytes include any per-object DownloadOutput calls made through
+	// this Downloader, which share the link.
+	d.logger.Infof("download: %s.", d.stats.summary())
 
 	return nil
 }
@@ -332,7 +337,7 @@ func (d *Downloader) DownloadOutput(ctx context.Context, output *v1.ActionsOutpu
 		w, closeFunc = dw, dw.Close
 	}
 
-	if err := d.client.DownloadBlock(ctx, d.headerSize+output.Offset, output.Size, w); err != nil {
+	if err := d.downloadRange(ctx, d.headerSize+output.Offset, output.Size, w); err != nil {
 		if closeFunc != nil {
 			_ = closeFunc()
 		}
