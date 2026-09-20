@@ -24,15 +24,20 @@ type byteBlobClient struct {
 
 func (c *byteBlobClient) GetURL(context.Context) (string, error) { return "blob://test", nil }
 
+// A range past the end is answered with what exists, as the storage does.
+func (c *byteBlobClient) slice(offset, size int64) []byte {
+	return c.blob[min(offset, int64(len(c.blob))):min(offset+size, int64(len(c.blob)))]
+}
+
 func (c *byteBlobClient) DownloadBlock(_ context.Context, offset, size int64, w io.Writer) error {
 	c.reads.Add(1)
-	_, err := w.Write(c.blob[offset : offset+size])
+	_, err := w.Write(c.slice(offset, size))
 
 	return err
 }
 
 func (c *byteBlobClient) DownloadBlockBuffer(_ context.Context, offset, size int64, buf []byte) error {
-	copy(buf, c.blob[offset:offset+size])
+	copy(buf, c.slice(offset, size))
 
 	return nil
 }
@@ -99,6 +104,8 @@ func TestDownloadAllOutputBlocks_SkipsWhatIsAlreadyLocal(t *testing.T) {
 
 			client := newByteBlob(t, contents)
 			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
+			// The header read is a read too; only the outputs are under test.
+			client.reads.Store(0)
 			if err != nil {
 				t.Fatalf("new downloader: %v", err)
 			}

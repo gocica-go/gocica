@@ -241,6 +241,12 @@ func runServe(logger log.Logger) error {
 		gomodcache = resolveGoModCache(logger)
 	}
 
+	// Before the module proxy's own handshake, so the two overlap.
+	var prewarm *buildPrewarm
+	if CLI.Serve.PrewarmBuild {
+		prewarm = startBuildPrewarm(ctx, logger)
+	}
+
 	daemon, err := kessoku.InitializeModuleProxy(
 		ctx,
 		logger,
@@ -268,10 +274,8 @@ func runServe(logger log.Logger) error {
 		}
 	}
 
-	if CLI.Serve.PrewarmBuild {
-		daemon.SetAfterPrefetch(func(ctx context.Context) {
-			prewarmBuildCache(ctx, logger)
-		})
+	if prewarm != nil {
+		daemon.SetAfterPrefetch(prewarm.Run)
 	}
 
 	fmt.Printf("{\"url\":%q,\"goproxy\":%q}\n", daemon.URL(), goproxy)
@@ -283,54 +287,95 @@ func runServe(logger log.Logger) error {
 	return nil
 }
 
-// prewarmBuildCache pulls the build cache blob onto local disk while the daemon
-// is otherwise idle.
+// buildPrewarm pulls the build cache blob onto local disk while the daemon is
+// otherwise idle.
 //
 // Without it the first `go` command of the job restores it inside its own wall
 // time, and every later `go` command in the same job pays again. This is the one
 // thing actions/setup-go does that gocica structurally did not: restore before
 // the build rather than during it.
 //
+// It is in two halves. The handshake -- the cache API call and the blob header --
+// starts at once, alongside the module proxy's own, because the two are
+// independent round trips and were measured at ~1.1s back to back. The download
+// waits until the module store is warm: anything still transferring when the go
+// command starts lands on top of the build.
+//
 // It is wired by hand rather than through the injector because it needs a second
 // remote in the same process -- the build cache namespace, not the module one --
 // and the graph is keyed by type.
-func prewarmBuildCache(ctx context.Context, logger log.Logger) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Errorf("panic while prewarming the build cache: %v", r)
-		}
+type buildPrewarm struct {
+	logger     log.Logger
+	handshaken chan struct{}
+	downloader *core.Downloader // nil once handshaken: nothing to prewarm
+}
+
+func startBuildPrewarm(ctx context.Context, logger log.Logger) *buildPrewarm {
+	p := &buildPrewarm{logger: logger, handshaken: make(chan struct{})}
+	go func() {
+		defer close(p.handshaken)
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Errorf("panic while preparing the build cache prewarm: %v", r)
+			}
+		}()
+		p.downloader = p.handshake(ctx)
 	}()
 
-	downloadProvider, _, err := provider.GHACacheProvider(ctx, logger, githubConfig())
-	if err != nil {
-		logger.Warnf("prewarm the build cache: %v", err)
+	return p
+}
 
-		return
+func (p *buildPrewarm) handshake(ctx context.Context) *core.Downloader {
+	downloadProvider, _, err := provider.GHACacheProvider(ctx, p.logger, githubConfig())
+	if err != nil {
+		p.logger.Warnf("prewarm the build cache: %v", err)
+
+		return nil
 	}
 
 	client, err := downloadProvider(ctx)
 	if err != nil || client == nil {
-		logger.Debugf("no build cache to prewarm: %v", err)
+		p.logger.Debugf("no build cache to prewarm: %v", err)
 
-		return
+		return nil
 	}
 
-	downloader, err := core.NewDownloader(ctx, logger, client)
+	downloader, err := core.NewDownloader(ctx, p.logger, client)
 	if err != nil {
-		logger.Warnf("prewarm the build cache: %v", err)
+		p.logger.Warnf("prewarm the build cache: %v", err)
 
+		return nil
+	}
+
+	return downloader
+}
+
+// Run downloads the blob. It waits for the handshake first.
+func (p *buildPrewarm) Run(ctx context.Context) {
+	select {
+	case <-p.handshaken:
+	case <-ctx.Done():
+		return
+	}
+	if p.downloader == nil {
 		return
 	}
 
-	disk, err := local.NewDisk(logger, local.DiskDir(CLI.Dir))
+	defer func() {
+		if r := recover(); r != nil {
+			p.logger.Errorf("panic while prewarming the build cache: %v", r)
+		}
+	}()
+
+	disk, err := local.NewDisk(p.logger, local.DiskDir(CLI.Dir))
 	if err != nil {
-		logger.Warnf("prewarm the build cache: %v", err)
+		p.logger.Warnf("prewarm the build cache: %v", err)
 
 		return
 	}
 
-	if err := core.PrewarmLocal(ctx, logger, downloader, disk); err != nil {
-		logger.Warnf("prewarm the build cache: %v", err)
+	if err := core.PrewarmLocal(ctx, p.logger, p.downloader, disk); err != nil {
+		p.logger.Warnf("prewarm the build cache: %v", err)
 	}
 }
 

@@ -125,8 +125,7 @@ func TestNewDownloader(t *testing.T) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-				client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
 
 				return append(sizeBuf, headerBytes...)
 			},
@@ -134,7 +133,7 @@ func TestNewDownloader(t *testing.T) {
 		{
 			name: "size download error",
 			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
-				client.expectDownloadBlockBuffer(0, 8, nil, errors.New("download error"))
+				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, nil, errors.New("download error"))
 				return nil
 			},
 			expectError: true,
@@ -150,7 +149,7 @@ func TestNewDownloader(t *testing.T) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
+				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, sizeBuf, nil)
 				client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), nil, errors.New("download error"))
 
 				return nil
@@ -158,13 +157,32 @@ func TestNewDownloader(t *testing.T) {
 			expectError: true,
 		},
 		{
+			// An empty index marshals to zero bytes, so this is a valid blob.
 			name: "zero size header",
 			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
 				sizeBuf := make([]byte, 8)
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
+				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, sizeBuf, nil)
 				return sizeBuf
 			},
-			expectError: true,
+		},
+		{
+			name: "header larger than the speculation",
+			setupMock: func(client *mockDownloadClient, header *v1.ActionsCache) []byte {
+				headerBytes, err := proto.Marshal(header)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				sizeBuf := make([]byte, 8)
+				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
+
+				// Only the prefix and the first byte come back; the rest is a
+				// second, exact request.
+				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes[0]), nil)
+				client.expectDownloadBlockBuffer(9, int64(len(headerBytes)-1), headerBytes[1:], nil)
+
+				return append(sizeBuf, headerBytes...)
+			},
 		},
 		{
 			name: "invalid protobuf",
@@ -173,8 +191,7 @@ func TestNewDownloader(t *testing.T) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(invalidProto)))
 
-				client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-				client.expectDownloadBlockBuffer(8, int64(len(invalidProto)), invalidProto, nil)
+				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), invalidProto...), nil)
 
 				return append(sizeBuf, invalidProto...)
 			},
@@ -300,8 +317,7 @@ func TestDownloader_GetEntries(t *testing.T) {
 			sizeBuf := make([]byte, 8)
 			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+			client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
 
 			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
 			if err != nil {
@@ -379,8 +395,7 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			sizeBuf := make([]byte, 8)
 			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+			client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(client)
@@ -595,8 +610,7 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 			headerSize := int64(8 + len(headerBytes))
 
-			client.expectDownloadBlockBuffer(0, 8, sizeBuf, nil)
-			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
+			client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
 
 			if tt.setupMock != nil {
 				err := tt.setupMock(client, headerSize)
