@@ -125,7 +125,8 @@ func TestNewDownloader(t *testing.T) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
+				client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
+				client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
 
 				return append(sizeBuf, headerBytes...)
 			},
@@ -133,7 +134,7 @@ func TestNewDownloader(t *testing.T) {
 		{
 			name: "size download error",
 			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
-				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, nil, errors.New("download error"))
+				client.expectDownloadBlock(0, headerPrefixSize, nil, errors.New("download error"))
 				return nil
 			},
 			expectError: true,
@@ -149,7 +150,7 @@ func TestNewDownloader(t *testing.T) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, sizeBuf, nil)
+				client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
 				client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), nil, errors.New("download error"))
 
 				return nil
@@ -161,29 +162,11 @@ func TestNewDownloader(t *testing.T) {
 			name: "zero size header",
 			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
 				sizeBuf := make([]byte, 8)
-				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, sizeBuf, nil)
+				client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
 				return sizeBuf
 			},
 		},
-		{
-			name: "header larger than the speculation",
-			setupMock: func(client *mockDownloadClient, header *v1.ActionsCache) []byte {
-				headerBytes, err := proto.Marshal(header)
-				if err != nil {
-					t.Fatal(err)
-				}
 
-				sizeBuf := make([]byte, 8)
-				binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
-
-				// Only the prefix and the first byte come back; the rest is a
-				// second, exact request.
-				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes[0]), nil)
-				client.expectDownloadBlockBuffer(9, int64(len(headerBytes)-1), headerBytes[1:], nil)
-
-				return append(sizeBuf, headerBytes...)
-			},
-		},
 		{
 			name: "invalid protobuf",
 			setupMock: func(client *mockDownloadClient, _ *v1.ActionsCache) []byte {
@@ -191,7 +174,8 @@ func TestNewDownloader(t *testing.T) {
 				sizeBuf := make([]byte, 8)
 				binary.BigEndian.PutUint64(sizeBuf, uint64(len(invalidProto)))
 
-				client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), invalidProto...), nil)
+				client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
+				client.expectDownloadBlockBuffer(8, int64(len(invalidProto)), invalidProto, nil)
 
 				return append(sizeBuf, invalidProto...)
 			},
@@ -317,7 +301,8 @@ func TestDownloader_GetEntries(t *testing.T) {
 			sizeBuf := make([]byte, 8)
 			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-			client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
+			client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
+			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
 
 			downloader, err := NewDownloader(t.Context(), log.DefaultLogger, client)
 			if err != nil {
@@ -395,7 +380,8 @@ func TestDownloader_GetOutputBlockURL(t *testing.T) {
 			sizeBuf := make([]byte, 8)
 			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 
-			client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
+			client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
+			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
 
 			if tt.setupMock != nil {
 				tt.setupMock(client)
@@ -610,7 +596,8 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 			binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
 			headerSize := int64(8 + len(headerBytes))
 
-			client.expectDownloadBlock(0, DefaultSpeculativeHeaderSize, append(slices.Clone(sizeBuf), headerBytes...), nil)
+			client.expectDownloadBlock(0, headerPrefixSize, sizeBuf, nil)
+			client.expectDownloadBlockBuffer(8, int64(len(headerBytes)), headerBytes, nil)
 
 			if tt.setupMock != nil {
 				err := tt.setupMock(client, headerSize)
@@ -671,4 +658,48 @@ func TestDownloader_DownloadAllOutputBlocks(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A speculative first request that covers the index is the only request; one
+// that falls short is followed by an exact request for the rest.
+func TestNewDownloader_SpeculativeHeader(t *testing.T) {
+	t.Parallel()
+
+	header := &v1.ActionsCache{Entries: map[string]*v1.IndexEntry{"test": {OutputId: "test", Size: 100}}}
+	headerBytes, err := proto.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sizeBuf := make([]byte, 8)
+	binary.BigEndian.PutUint64(sizeBuf, uint64(len(headerBytes)))
+	blob := append(slices.Clone(sizeBuf), headerBytes...)
+
+	t.Run("covers the index", func(t *testing.T) {
+		t.Parallel()
+
+		client := &mockDownloadClient{}
+		client.expectDownloadBlock(0, 1<<20, blob, nil)
+		d, err := NewDownloaderWithOptions(t.Context(), log.DefaultLogger, client, DownloaderOptions{SpeculativeHeaderSize: 1 << 20})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.headerSize != int64(len(blob)) {
+			t.Errorf("headerSize = %d, want %d", d.headerSize, len(blob))
+		}
+	})
+
+	t.Run("falls short", func(t *testing.T) {
+		t.Parallel()
+
+		client := &mockDownloadClient{}
+		client.expectDownloadBlock(0, 9, blob[:9], nil)
+		client.expectDownloadBlockBuffer(9, int64(len(headerBytes)-1), headerBytes[1:], nil)
+		d, err := NewDownloaderWithOptions(t.Context(), log.DefaultLogger, client, DownloaderOptions{SpeculativeHeaderSize: 9})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := d.header.Entries["test"]; !ok {
+			t.Error("the index was not read")
+		}
+	})
 }

@@ -31,19 +31,20 @@ type Downloader struct {
 	outputIndex     map[string]*v1.ActionsOutput
 }
 
-// DefaultSpeculativeHeaderSize is how much of the blob's head is fetched in one
-// request when reading the header. The header is an 8-byte length followed by
-// the index, whose size is only known after the first request; reading them
-// separately costs a round trip on every handshake, and the module proxy makes
-// two of those before any bytes of the cache move. Measured against
-// tailscale/tailscale the index is well under this, so the second request is
-// gone; a larger index still works, it just pays the round trip as before.
-const DefaultSpeculativeHeaderSize = 4 << 20
-
+// Speculative header reads were measured and withdrawn. The header is an
+// 8-byte length followed by the index, and reading them in one request (the
+// first 4 MiB of the blob) was meant to save a round trip. Measured on
+// ubuntu-latest the round trip is ~70ms, and the module proxy's whole
+// handshake took 0.15s; the 4 MiB read took 0.5-3.3s instead, because a single
+// fresh connection is in TCP slow start and, on a bad job, throttled -- the
+// same straggler the bulk download hedges against, only here on the critical
+// path with nothing to hedge with. So by default the two small requests stay.
+//
 // DownloaderOptions tunes a Downloader.
 type DownloaderOptions struct {
-	// SpeculativeHeaderSize overrides DefaultSpeculativeHeaderSize. Anything
-	// below the 8-byte length prefix reads only that, as before.
+	// SpeculativeHeaderSize is how much of the blob's head to ask for in the
+	// first request. Zero, the default, reads just the length prefix and then
+	// the index: two small requests. See the note above before raising it.
 	SpeculativeHeaderSize int64
 }
 
@@ -76,13 +77,8 @@ func NewDownloaderWithOptions(
 		client: client,
 	}
 
-	speculate := options.SpeculativeHeaderSize
-	if speculate == 0 {
-		speculate = DefaultSpeculativeHeaderSize
-	}
-
 	var err error
-	downloader.header, downloader.headerSize, err = downloader.readHeader(ctx, speculate)
+	downloader.header, downloader.headerSize, err = downloader.readHeader(ctx, options.SpeculativeHeaderSize)
 	if err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
@@ -94,8 +90,8 @@ func NewDownloaderWithOptions(
 const headerPrefixSize = 8
 
 // readHeader fetches the length prefix and the index behind it. The first
-// request asks for speculate bytes: when the index fits, that is the only
-// request; otherwise the rest is fetched with a second one, as it always was.
+// request asks for speculate bytes (at least the prefix): when the index fits,
+// that is the only request; otherwise the rest is fetched with a second one.
 func (d *Downloader) readHeader(ctx context.Context, speculate int64) (header *v1.ActionsCache, headerSize int64, err error) {
 	if d.client == nil {
 		return &v1.ActionsCache{
