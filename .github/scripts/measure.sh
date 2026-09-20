@@ -55,6 +55,14 @@ dev_flags() {
     "$METRICS_DIR" "$name" "$SCENARIO" "$REP"
 }
 
+# What the runner looked like, for reading the disk numbers later.
+{
+  echo "## sysctl"; sysctl vm.dirty_background_ratio vm.dirty_ratio vm.dirty_expire_centisecs 2>/dev/null
+  echo "## mounts"; findmnt -no SOURCE,FSTYPE,OPTIONS,TARGET "$(go env GOMODCACHE)" "$(go env GOCACHE)" "${GOCICA_DIR:-${RUNNER_TEMP:-/tmp}}" / /mnt 2>/dev/null
+  echo "## lsblk"; lsblk -o NAME,SIZE,TYPE,MOUNTPOINTS,ROTA 2>/dev/null
+  echo "## mem"; free -m
+} > "$METRICS_DIR/runner-$SCENARIO-$REP.txt" 2>&1 || true
+
 case "$SCENARIO" in
 setupgo*) ;;
 *)

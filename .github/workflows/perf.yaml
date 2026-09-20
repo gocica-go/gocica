@@ -45,6 +45,16 @@ on:
         required: false
         type: boolean
         default: false
+      sysctl:
+        description: 'Kernel settings to apply before anything writes, e.g. "vm.dirty_background_ratio=50 vm.dirty_ratio=80". Empty leaves the runner as is.'
+        required: false
+        default: ''
+      disk:
+        description: Where the caches live. "root" is the runner's OS disk, "mnt" its local temporary disk.
+        required: false
+        type: choice
+        options: [root, mnt]
+        default: root
 
 permissions:
   actions: write
@@ -65,6 +75,14 @@ env:
   GOTOOLCHAIN: local
   GOCICA_PROFILE: ${{ github.event.inputs.profile || 'false' }}
   GOCICA_MODULE_PROXY_EXTRACTED_CACHE: ${{ github.event.inputs.extracted-module-cache || 'false' }}
+  SYSCTL: ${{ github.event.inputs.sysctl || '' }}
+  DISK: ${{ github.event.inputs.disk || 'root' }}
+  # On the temporary disk every cache moves together: setup-go restores into
+  # GOMODCACHE and GOCACHE wherever they point, and gocica's store has to share a
+  # filesystem with GOMODCACHE.
+  GOMODCACHE: ${{ github.event.inputs.disk == 'mnt' && '/mnt/go/pkg/mod' || '' }}
+  GOCACHE: ${{ github.event.inputs.disk == 'mnt' && '/mnt/go-build' || '' }}
+  GOCICA_DIR: ${{ github.event.inputs.disk == 'mnt' && '/mnt/gocica' || '' }}
 
 jobs:
   build:
@@ -130,6 +148,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -184,6 +212,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -225,6 +263,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -272,6 +320,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -316,6 +374,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ matrix.entry.ref }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -368,6 +436,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ matrix.entry.ref }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -406,6 +484,16 @@ jobs:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
           path: target
+      - name: Prepare the runner
+        run: |
+          if [ -n "$SYSCTL" ]; then
+            # shellcheck disable=SC2086
+            sudo sysctl -w $SYSCTL
+          fi
+          if [ "$DISK" = mnt ]; then
+            sudo mkdir -p /mnt/go /mnt/go-build /mnt/gocica
+            sudo chown -R "$(id -u):$(id -g)" /mnt/go /mnt/go-build /mnt/gocica
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}

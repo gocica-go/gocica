@@ -3,9 +3,11 @@ package metrics
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/prometheus/procfs"
+	"github.com/prometheus/procfs/blockdevice"
 )
 
 var (
@@ -15,6 +17,12 @@ var (
 	memSelfGauge   = NewGauge("mem_self")
 	networkRxGauge = NewGauge("network_rx")
 	networkTxGauge = NewGauge("network_tx")
+	// Cumulative, per block device: bytes written, write requests completed,
+	// and milliseconds the device spent with I/O in flight. Rates come from
+	// differencing consecutive samples.
+	diskWriteBytesGauge = NewGauge("disk_write_bytes")
+	diskWriteIOsGauge   = NewGauge("disk_write_ios")
+	diskIOTimeGauge     = NewGauge("disk_io_time")
 )
 
 func InitProcStat() error {
@@ -37,6 +45,11 @@ func InitProcStat() error {
 			}
 
 			err = getSelfStat(fs)
+			if err != nil {
+				log.Printf("failed to get stat: %v", err)
+			}
+
+			err = getDiskStat(fs)
 			if err != nil {
 				log.Printf("failed to get stat: %v", err)
 			}
@@ -124,4 +137,43 @@ func getSelfStat(fs procfs.FS) error {
 	}
 
 	return nil
+}
+
+// sectorSize is what /proc/diskstats counts in, regardless of the device's
+// actual sector size.
+const sectorSize = 512
+
+func getDiskStat(procfs.FS) error {
+	bfs, err := blockdevice.NewDefaultFS()
+	if err != nil {
+		return fmt.Errorf("create blockdevice fs: %w", err)
+	}
+
+	stats, err := bfs.ProcDiskstats()
+	if err != nil {
+		return fmt.Errorf("get diskstats: %w", err)
+	}
+
+	for _, d := range stats {
+		// Whole disks only: partitions and loop devices would double count.
+		if strings.HasPrefix(d.DeviceName, "loop") || strings.HasPrefix(d.DeviceName, "dm-") ||
+			strings.HasPrefix(d.DeviceName, "sr") || isPartition(d.DeviceName) {
+			continue
+		}
+
+		diskWriteBytesGauge.Set(float64(d.WriteSectors)*sectorSize, d.DeviceName)
+		diskWriteIOsGauge.Set(float64(d.WriteIOs), d.DeviceName)
+		diskIOTimeGauge.Set(float64(d.IOsTotalTicks), d.DeviceName)
+	}
+
+	return nil
+}
+
+// isPartition recognises "sda1" and "nvme0n1p1", but not "sda" or "nvme0n1".
+func isPartition(name string) bool {
+	if strings.HasPrefix(name, "nvme") {
+		return strings.Contains(name, "p")
+	}
+
+	return len(name) > 0 && name[len(name)-1] >= '0' && name[len(name)-1] <= '9'
 }
