@@ -28,7 +28,10 @@ import (
 // end is faster than any of those were. What gives it away is that it is alone
 // and still far below what the link just did. So the reference is the peak
 // aggregate rate seen so far, divided by the number of streams in flight, and a
-// stream is slow when its own recent rate is a fraction of that share.
+// stream is slow when its own recent rate is a fraction of that share -- and
+// only once the link as a whole has gone quiet. While the link is still near
+// its peak the slow streams are the ones queued behind the fast ones, and
+// measured, hedging those just added connections to a saturated link.
 //
 // The same resume-from-offset loop doubles as bounded retry for a body that
 // breaks mid-transfer, which previously failed the whole chunk.
@@ -40,6 +43,10 @@ const (
 	// hedgeSlowFraction: a stream is slow when its recent rate is below this
 	// fraction of its fair share of the peak link rate.
 	hedgeSlowFraction = 4
+	// hedgeTailFraction: nothing is judged while the link is delivering more
+	// than this fraction of its peak. That is the contended phase, where a
+	// slow stream is merely queued.
+	hedgeTailFraction = 2
 	// hedgeMinRemaining: below this a fresh request costs more than it saves.
 	hedgeMinRemaining = 256 << 10
 	// hedgeMinPeak keeps a link that has barely moved from judging anything.
@@ -396,7 +403,7 @@ func (d *Downloader) watchStream(
 			now := time.Now()
 			count := sink.count()
 			ownRate, ownOK := own.observe(now, count)
-			_, peak, linkOK := d.stats.linkRate(now)
+			linkRate, peak, linkOK := d.stats.linkRate(now)
 
 			remaining := size - count
 			if remaining < hedgeMinRemaining || now.Sub(started) < hedgeFloor {
@@ -405,13 +412,16 @@ func (d *Downloader) watchStream(
 			if !ownOK || !linkOK || peak < hedgeMinPeak {
 				continue
 			}
+			if linkRate >= peak/hedgeTailFraction {
+				continue
+			}
 			share := peak / float64(max(d.stats.active.Load(), 1))
 			if ownRate >= share/hedgeSlowFraction {
 				continue
 			}
 
-			d.logger.Debugf("range at offset %d is slow: %.1f MB/s with %d bytes left, link peaked at %.0f MB/s over %d streams. requesting a spare.",
-				offset, ownRate/(1<<20), remaining, peak/(1<<20), d.stats.active.Load())
+			d.logger.Debugf("range at offset %d is slow: %.1f MB/s with %d bytes left, link at %.0f of a peak %.0f MB/s over %d streams. requesting a spare.",
+				offset, ownRate/(1<<20), remaining, linkRate/(1<<20), peak/(1<<20), d.stats.active.Load())
 			spare := d.startSpare(ctx, offset+count, remaining)
 			select {
 			case <-spare.peeked:

@@ -43,6 +43,7 @@ type shapedClient struct {
 type shapedRequest struct {
 	offset, size int64
 	cancelled    bool
+	started, end time.Time
 }
 
 func newShapedClient(blob []byte) *shapedClient {
@@ -61,8 +62,13 @@ func (c *shapedClient) DownloadBlock(ctx context.Context, offset, size int64, w 
 	n := c.calls.Add(1)
 	c.locker.Lock()
 	idx := len(c.requests)
-	c.requests = append(c.requests, shapedRequest{offset: offset, size: size})
+	c.requests = append(c.requests, shapedRequest{offset: offset, size: size, started: time.Now()})
 	c.locker.Unlock()
+	defer func() {
+		c.locker.Lock()
+		c.requests[idx].end = time.Now()
+		c.locker.Unlock()
+	}()
 
 	sh, ok := c.shapes[n]
 	if !ok {
@@ -256,6 +262,51 @@ func TestDownloadRange_SpliceLandsInsideAJoinedWriter(t *testing.T) {
 	}
 	if got := d.stats.hedges.Load(); got != 1 {
 		t.Errorf("hedges = %d, want 1", got)
+	}
+}
+
+// While the link is saturated a slow stream is merely queued: it is hedged
+// only once the fast ones are done and the link has gone quiet.
+func TestDownloadRange_WaitsForTheTail(t *testing.T) {
+	t.Parallel()
+
+	blob := testBlob(peakStreams*peakStreamSize + 2<<20)
+	client := newShapedClient(blob)
+	d := newHedgeDownloader(client)
+
+	for i := range int64(peakStreams) {
+		client.shapes[i+1] = shape{chunk: 64 << 10, interval: 10 * time.Millisecond}
+	}
+	// Request 5 runs alongside them at a tenth of their rate.
+	client.shapes[peakStreams+1] = shape{chunk: 64 << 10, interval: 100 * time.Millisecond}
+	offset := int64(peakStreams * peakStreamSize)
+
+	var wg sync.WaitGroup
+	for i := range peakStreams {
+		wg.Go(func() {
+			_ = d.downloadRange(t.Context(), int64(i*peakStreamSize), peakStreamSize, io.Discard)
+		})
+	}
+	// Give the fast ones a head start so the slow one is request 5.
+	time.Sleep(50 * time.Millisecond)
+	var out bytes.Buffer
+	if err := d.downloadRange(t.Context(), offset, 2<<20, &out); err != nil {
+		t.Fatalf("downloadRange: %v", err)
+	}
+	wg.Wait()
+	if !bytes.Equal(out.Bytes(), blob[offset:]) {
+		t.Fatal("bytes differ")
+	}
+
+	reqs := client.snapshot()
+	if len(reqs) != peakStreams+2 {
+		t.Fatalf("got %d requests, want %d: the slow stream hedged once", len(reqs), peakStreams+2)
+	}
+	spare := reqs[peakStreams+1]
+	for _, fast := range reqs[:peakStreams] {
+		if spare.started.Before(fast.end) {
+			t.Errorf("the spare started at %s while a fast stream ran until %s: hedged under load", spare.started.Format("15:04:05.000"), fast.end.Format("15:04:05.000"))
+		}
 	}
 }
 
