@@ -45,8 +45,8 @@ type serveCmd struct {
 	PrewarmBuild    bool          `kong:"name='prewarm-build-cache',default='true',negatable,help='Also pull the build cache onto local disk while the daemon is idle, so the first go command does not pay for it.',env='GOCICA_MODULE_PROXY_PREWARM_BUILD_CACHE'"`
 	StateFile       string        `kong:"help='Where to record the URL and pid. Defaults to <dir>/mod/proxy.json.',env='GOCICA_MODULE_PROXY_STATE_FILE'"`
 	Prefetch        int           `kong:"default='24',help='How many cached modules to pull from the remote at once on startup. 0 uses the default, a negative value disables prefetching.',env='GOCICA_MODULE_PROXY_PREFETCH'"`
-	TreeCache       bool          `kong:"name='extracted-module-cache',negatable,help='Restore modules into GOMODCACHE already extracted and prefill the download cache. Off by default: measured, it is a wash on a warm run and costs ~400MB of extra transfer, because both the zips and the trees end up in the blob.',env='GOCICA_MODULE_PROXY_EXTRACTED_CACHE'"`
-	GoModCache      string        `kong:"help='Module cache to restore extracted modules into. Defaults to go env GOMODCACHE.',env='GOCICA_MODULE_PROXY_GOMODCACHE'"`
+	TreeCache       bool          `kong:"name='extracted-module-cache',default='true',negatable,help='Restore modules into GOMODCACHE already extracted and prefill the download cache. On by default: with it off the go command extracts every module itself, which on a warm run takes go mod download from about 1s to 7-13s, or a build-only go build from 12-14s to 20-28s. --no-extracted-module-cache keeps the ~400MB of trees out of the blob.',env='GOCICA_MODULE_PROXY_EXTRACTED_CACHE'"`
+	GoModCache      string        `kong:"help='Module cache to restore extracted modules into. Defaults to GOMODCACHE, then go env GOMODCACHE, then GOPATH/pkg/mod, then $HOME/go/pkg/mod, so the daemon can start before the toolchain is installed.',env='GOCICA_MODULE_PROXY_GOMODCACHE'"`
 }
 
 // proxyStopCmd asks a running daemon to flush and exit.
@@ -336,8 +336,11 @@ func prewarmBuildCache(ctx context.Context, logger log.Logger) {
 
 // resolveGoModCache finds the module cache to restore extracted modules into.
 //
-// Asking the go command is the only reliable answer: GOMODCACHE may come from
-// the environment, from the go env config file, or from GOPATH.
+// The go command is asked when it is on PATH, because it is the only thing that
+// honours `go env -w GOMODCACHE=...`. When it is not there yet -- the daemon is
+// meant to start before actions/setup-go, so that its warm-up overlaps the
+// toolchain download -- the answer is the toolchain's own default rule, which
+// is what `go env` would print on a runner nobody has configured.
 func resolveGoModCache(logger log.Logger) string {
 	if dir := CLI.Serve.GoModCache; dir != "" {
 		return dir
@@ -350,13 +353,40 @@ func resolveGoModCache(logger log.Logger) string {
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, "go", "env", "GOMODCACHE").Output()
-	if err != nil {
-		logger.Warnf("resolve GOMODCACHE: %v. extracted modules will not be restored.", err)
+	if err == nil {
+		if dir := strings.TrimSpace(string(out)); dir != "" {
+			return dir
+		}
+	}
+
+	dir := defaultGoModCache(os.Getenv)
+	if dir == "" {
+		logger.Warnf("resolve GOMODCACHE: go env failed (%v) and neither GOPATH nor HOME is set. extracted modules will not be restored.", err)
 
 		return ""
 	}
+	logger.Debugf("resolve GOMODCACHE: go env unavailable (%v). using %s", err, dir)
 
-	return strings.TrimSpace(string(out))
+	return dir
+}
+
+// defaultGoModCache is the toolchain's rule for GOMODCACHE when nothing sets it:
+// the first GOPATH entry, itself defaulting to $HOME/go, plus pkg/mod
+// (cmd/go/internal/cfg). Empty when neither GOPATH nor HOME is known.
+func defaultGoModCache(getenv func(string) string) string {
+	gopath := getenv("GOPATH")
+	if gopath != "" {
+		gopath, _, _ = strings.Cut(gopath, string(filepath.ListSeparator))
+	}
+	if gopath == "" {
+		home := getenv("HOME")
+		if home == "" {
+			return ""
+		}
+		gopath = filepath.Join(home, "go")
+	}
+
+	return filepath.Join(gopath, "pkg", "mod")
 }
 
 func exportGithubEnv(key, value string) error {

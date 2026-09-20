@@ -49,6 +49,16 @@ environment variable.
   `GOPROXY=http://127.0.0.1:<port>|<your previous GOPROXY>`. The `|` separator
   makes the go command fall back on *any* error, not just 404 and 410, so a proxy
   that never starts or dies mid-build is invisible.
+- **Modules come back already extracted.** Before it reports ready, the daemon
+  restores every cached module into `GOMODCACHE` in extracted form, so a warm
+  `go build` unzips nothing. Measured against `tailscale/tailscale`, extracting
+  them in the go command instead takes `go mod download` from about 1s to
+  7-13s, or a build-only `go build` from 12-14s to 20-28s.
+  `--no-extracted-module-cache` turns it off and keeps the ~400MB of trees out
+  of the blob.
+- **The daemon does not need the toolchain.** When `go` is not on `PATH` yet it
+  resolves `GOMODCACHE` by the go command's own default rule, so `gocica serve`
+  can start before `actions/setup-go` and warm up while the toolchain downloads.
 - **Only immutable things are cached**: `.info`, `.mod` and `.zip` at canonical
   versions. `@v/list`, `@latest`, `/sumdb/…` and `golang.org/toolchain` are
   answered with 404 so the go command resolves them itself. In particular,
