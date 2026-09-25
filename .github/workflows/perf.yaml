@@ -146,7 +146,7 @@ jobs:
           path: gocica-src
       - name: Clear the gocica cache entries
         if: matrix.rep == 0
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const script = require('./gocica-src/.github/scripts/clear-caches.js')
@@ -215,7 +215,7 @@ jobs:
           path: gocica-src
       - name: Clear the setup-go cache entries
         if: matrix.rep == 0
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const script = require('./gocica-src/.github/scripts/clear-caches.js')
