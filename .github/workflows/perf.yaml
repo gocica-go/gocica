@@ -93,7 +93,7 @@ jobs:
       reps: ${{ steps.matrix.outputs.reps }}
       dep-matrix: ${{ steps.matrix.outputs.dep-matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -141,7 +141,7 @@ jobs:
       matrix:
         rep: ${{ fromJSON(needs.build.outputs.reps) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
       - name: Clear the gocica cache entries
@@ -151,7 +151,7 @@ jobs:
           script: |
             const script = require('./gocica-src/.github/scripts/clear-caches.js')
             await script({ github, context, prefixes: ['gocica-cache-', 'gocica-mod-'] })
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -210,7 +210,7 @@ jobs:
       matrix:
         rep: ${{ fromJSON(needs.build.outputs.reps) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
       - name: Clear the setup-go cache entries
@@ -220,7 +220,7 @@ jobs:
           script: |
             const script = require('./gocica-src/.github/scripts/clear-caches.js')
             await script({ github, context, prefixes: ['setup-go-'] })
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -281,10 +281,10 @@ jobs:
       matrix:
         rep: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -342,10 +342,10 @@ jobs:
       matrix:
         rep: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -414,10 +414,10 @@ jobs:
       matrix:
         entry: ${{ fromJSON(needs.build.outputs.dep-matrix) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ matrix.entry.ref }}
@@ -475,10 +475,10 @@ jobs:
       matrix:
         entry: ${{ fromJSON(needs.build.outputs.dep-matrix) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ matrix.entry.ref }}
@@ -528,10 +528,10 @@ jobs:
       matrix:
         rep: ${{ fromJSON(needs.build.outputs.reps) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: gocica-src
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.TARGET_REPO }}
           ref: ${{ env.TARGET_REF }}
@@ -575,7 +575,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
