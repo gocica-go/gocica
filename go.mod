@@ -5,10 +5,10 @@ go 1.27.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.4
 	github.com/DataDog/zstd v1.5.6
-	github.com/alecthomas/kong v1.14.0
+	github.com/alecthomas/kong v1.15.0
 	github.com/felixge/fgprof v0.9.5
 	github.com/google/go-cmp v0.7.0
-	github.com/mazrean/kessoku v1.1.0
+	github.com/mazrean/kessoku v1.1.1
 	github.com/mazrean/odjson v0.2.0
 	github.com/prometheus/procfs v0.22.0
 	golang.org/x/oauth2 v0.37.0
