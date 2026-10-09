@@ -12,7 +12,7 @@ tool (
 )
 
 require (
-	golang.org/x/tools v0.50.0
+	golang.org/x/tools v0.51.0
 	honnef.co/go/tools v0.8.1
 )
 
